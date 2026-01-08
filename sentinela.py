@@ -4,28 +4,28 @@ import requests
 from email.message import EmailMessage
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from bs4 import BeautifulSoup  # Importante para ler o HTML
+from bs4 import BeautifulSoup
+from duckduckgo_search import DDGS # A novidade: motor de busca
 
 # --- CONFIGURAÇÕES ---
 EMAIL_ORIGEM = os.environ.get('EMAIL_REMETENTE')
 SENHA_APP = os.environ.get('SENHA_APP')
 EMAIL_DESTINO = EMAIL_ORIGEM
 
-# Palavras que queremos monitorar (Edite conforme necessário)
-PALAVRAS_CHAVE = [
-    "física médica", 
-    "ultrassom", 
-    "raio-x", 
-    "bolsa de pesquisa", 
-    "chamada pública", 
-    "edital", 
-    "ciências da saúde",
-    "fapergs",
-    "cnpq"
+# Palavras para verificação em sites fixos (FAPERGS, DOU)
+PALAVRAS_CHAVE_FIXAS = ["física médica", "ultrassom", "chamada pública", "edital"]
+
+# Termos para pesquisar na "Internet Geral" (Nacional e Internacional)
+# DICA: Use aspas para termos exatos e adicione o ano para filtrar coisas velhas.
+TERMOS_DE_BUSCA = [
+    '"medical physics" grant 2026', 
+    '"ultrasound" research funding 2026',
+    'edital "física médica" 2026',
+    'bolsa doutorado sanduíche física médica 2026',
+    '"medical physics" phd position europe 2026'
 ]
 
 def criar_sessao_robusta():
-    """Cria uma sessão que parece um navegador."""
     session = requests.Session()
     retry = Retry(connect=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
     adapter = HTTPAdapter(max_retries=retry)
@@ -36,65 +36,74 @@ def criar_sessao_robusta():
     })
     return session
 
-def analisar_site(nome, url, session):
-    """Acessa o site e procura as palavras-chave."""
+def analisar_site_fixo(nome, url, session):
+    """Verifica links específicos que você já conhece."""
     try:
         resp = session.get(url, timeout=20)
-        
-        # Se der erro 404 ou 500, avisa
         if resp.status_code != 200:
-            return f"⚠️ {nome}: Erro ao acessar (Status {resp.status_code})"
+            return f"⚠️ {nome}: Erro (Status {resp.status_code})"
 
-        # Transforma o HTML em texto legível
         soup = BeautifulSoup(resp.content, 'html.parser')
-        texto_site = soup.get_text().lower() # Tudo em minúsculo para facilitar busca
-
-        encontradas = []
-        for palavra in PALAVRAS_CHAVE:
-            if palavra in texto_site:
-                encontradas.append(palavra)
-
+        texto_site = soup.get_text().lower()
+        
+        encontradas = [p for p in PALAVRAS_CHAVE_FIXAS if p in texto_site]
+        
         if encontradas:
-            return f"✅ {nome}: Encontrei termos de interesse: {', '.join(encontradas)}\n   Link: {url}"
-        else:
-            return f"ℹ️ {nome}: Site acessado, mas nenhuma palavra-chave encontrada hoje."
-
+            return f"✅ {nome}: Encontrei: {', '.join(encontradas)}\n   Link: {url}"
+        return f"ℹ️ {nome}: Nada novo encontrado."
     except Exception as e:
-        return f"❌ {nome}: Falha na conexão. Erro: {str(e)}"
+        return f"❌ {nome}: Erro de conexão."
+
+def buscar_na_web():
+    """Pesquisa no DuckDuckGo como se fosse um humano."""
+    relatorio_busca = []
+    relatorio_busca.append("--- RESULTADOS DA BUSCA NA WEB ---")
+    
+    print("Iniciando buscas na web...")
+    
+    with DDGS() as ddgs:
+        for termo in TERMOS_DE_BUSCA:
+            try:
+                # Traz os 5 primeiros resultados de cada termo
+                results = list(ddgs.text(termo, max_results=5))
+                
+                if results:
+                    relatorio_busca.append(f"\n🔍 Termo: {termo}")
+                    for r in results:
+                        titulo = r.get('title', 'Sem título')
+                        link = r.get('href', '#')
+                        # Filtra resultados muito irrelevantes (opcional)
+                        relatorio_busca.append(f"   • {titulo}\n     {link}")
+                else:
+                    relatorio_busca.append(f"\nSearch: {termo} (Sem resultados recentes)")
+            except Exception as e:
+                relatorio_busca.append(f"Erro ao buscar '{termo}': {str(e)}")
+                
+    return "\n".join(relatorio_busca)
 
 def executar_sentinela():
     session = criar_sessao_robusta()
-    relatorio = []
+    relatorio_final = []
     
-    print("Iniciando varredura...")
+    # 1. Checa os sites fixos (FAPERGS/DOU)
+    print("Checando sites fixos...")
+    relatorio_final.append("--- MONITORAMENTO FIXO ---")
+    relatorio_final.append(analisar_site_fixo("FAPERGS", "https://fapergs.rs.gov.br/editais-abertos", session))
+    relatorio_final.append(analisar_site_fixo("DOU", "https://www.in.gov.br/leiturajornal", session))
+    
+    # 2. Faz a busca na Web
+    relatorio_final.append("\n" + buscar_na_web())
 
-    # 1. FAPERGS (Link corrigido para Chamadas Abertas)
-    relatorio.append(analisar_site(
-        "FAPERGS", 
-        "https://fapergs.rs.gov.br/editais-abertos", 
-        session
-    ))
-
-    # 2. DOU (Diário Oficial - Seção de Pesquisa/Inovação)
-    # Nota: O DOU é complexo, vamos olhar a página de pesquisa simples por enquanto
-    relatorio.append(analisar_site(
-        "DOU (Pesquisa)", 
-        "https://www.in.gov.br/leiturajornal", 
-        session
-    ))
-
-    # Junta o relatório
-    texto_final = "\n\n".join(relatorio)
-    return texto_final
+    return "\n".join(relatorio_final)
 
 def enviar_email(corpo_mensagem):
     if not EMAIL_ORIGEM or not SENHA_APP:
-        print("Credenciais não configuradas.")
+        print("Credenciais ausentes.")
         return
 
     msg = EmailMessage()
-    msg.set_content(f"Olá,\n\nAqui está o resumo da varredura de hoje:\n\n{corpo_mensagem}")
-    msg['Subject'] = 'Sentinela: Atualização de Editais'
+    msg.set_content(corpo_mensagem)
+    msg['Subject'] = 'Sentinela: Radar de Editais e Buscas'
     msg['From'] = EMAIL_ORIGEM
     msg['To'] = EMAIL_DESTINO
 
@@ -108,5 +117,5 @@ def enviar_email(corpo_mensagem):
 
 if __name__ == "__main__":
     resultado = executar_sentinela()
-    print(resultado)
+    # print(resultado) # Descomente para testar localmente
     enviar_email(resultado)
