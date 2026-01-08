@@ -1,0 +1,30 @@
+name: Executar Sentinela
+
+on:
+  schedule:
+    # Roda todo dia às 09:00 (Horário de Brasília aprox. 12:00 UTC)
+    - cron: '0 12 * * *'
+  workflow_dispatch: # Permite rodar manualmente clicando num botão
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar código do repositório
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Instalar dependências
+        run: |
+          pip install -r requirements.txt
+
+      - name: Rodar Sentinela
+        env:
+          EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
+          SENHA_APP: ${{ secrets.SENHA_APP }}
+        run: python sentinela.py
