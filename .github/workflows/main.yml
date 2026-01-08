@@ -2,8 +2,8 @@ name: Executar Sentinela
 
 on:
   schedule:
-    # Roda todo dia às 09:00 (Horário de Brasília aprox. 12:00 UTC)
-    - cron: '0 19 * * *'
+    # 30 minutos, 9 horas (UTC)
+    - cron: '30 9 * * *'
   workflow_dispatch: # Permite rodar manualmente clicando num botão
 
 jobs:
