@@ -2,9 +2,8 @@ name: Executar Sentinela
 
 on:
   schedule:
-    # 30 minutos, 9 horas (UTC)
-    - cron: '30 9 * * *'
-  workflow_dispatch: # Permite rodar manualmente clicando num botão
+    - cron: '30 9 * * *' # 06:30 Brasil
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,7 +16,7 @@ jobs:
       - name: Configurar Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.11' # <--- MUDANÇA AQUI (Era 3.9)
 
       - name: Instalar dependências
         run: |
@@ -27,4 +26,5 @@ jobs:
         env:
           EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
           SENHA_APP: ${{ secrets.SENHA_APP }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} # <--- GARANTA QUE ISSO ESTÁ AQUI
         run: python sentinela.py
