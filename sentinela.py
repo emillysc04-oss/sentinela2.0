@@ -54,12 +54,12 @@ def analisar_site_fixo(nome, url, session):
     try:
         resp = session.get(url, timeout=20)
         if resp.status_code != 200:
-            return ("⚠️", f"{nome}: Erro {resp.status_code}", "orange")
+            return ( f"{nome}: Erro {resp.status_code}", "orange")
         soup = BeautifulSoup(resp.content, 'html.parser')
         texto = soup.get_text().lower()
         if any(x in texto for x in ["edital", "chamada", "inscrições abertas"]):
             return ("✅", f"{nome}: Possível edital aberto detectado.", "green")
-        return ("ℹ️", f"{nome}: Sem termos de abertura hoje.", "#777")
+        return ( f"{nome}: Sem resltados abertura hoje.", "#777")
     except:
         return ("❌", f"{nome}: Falha de conexão.", "red")
 
@@ -162,7 +162,7 @@ def executar_sentinela():
     session = criar_sessao_robusta()
     
     # Sites Fixos
-    fapergs = analisar_site_fixo("FAPERGS", "https://fapergs.rs.gov.br/editais-abertos", session)
+    #fapergs = analisar_site_fixo("FAPERGS", "https://fapergs.rs.gov.br/editais-abertos", session)
     dou = analisar_site_fixo("DOU", "https://www.in.gov.br/leiturajornal", session)
     
     # Busca IA
@@ -179,7 +179,7 @@ def executar_sentinela():
     <html>
     <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
         <div style="max-width: 700px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
-            <h2 style="color: #333; border-bottom: 2px solid #0d6efd; padding-bottom: 10px;">Sentinela Inteligente 🤖</h2>
+            <h2 style="color: #333; border-bottom: 2px solid #0d6efd; padding-bottom: 10px;">Sentinela </h2>
             
             <div style="background: #eef; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
                 <strong>Status Portais:</strong><br>
