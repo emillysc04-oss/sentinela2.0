@@ -7,37 +7,36 @@ from email.message import EmailMessage
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
+from duckduckgo_search import DDGS 
 
-# --- CONFIGURAÇÕES E CREDENCIAIS ---
+# --- CONFIGURAÇÕES ---
 EMAIL_ORIGEM = os.environ.get('EMAIL_REMETENTE')
 SENHA_APP = os.environ.get('SENHA_APP')
 EMAIL_DESTINO = EMAIL_ORIGEM
 GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
 
-# Configuração da IA (Gemini)
+# Configuração da IA
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
     model = genai.GenerativeModel('gemini-1.5-flash')
 else:
     model = None
-    print("AVISO: GEMINI_API_KEY não encontrada. A IA não será usada.")
 
 # --- EIXOS TEMÁTICOS ---
 EIXO_NUCLEAR = [
-    "Radioterapia", "Radiofármacos", "Medicina Nuclear", "Dosimetria", 
-    "Braquiterapia", "Acelerador Linear", "Proteção Radiológica"
+    "Radioterapia", "Radiofármacos", "Medicina Nuclear", "Física Médica",
+    "Dosimetria", "Proteção Radiológica"
 ]
 
 EIXO_IA_SAUDE = [
     "Inteligência Artificial saúde", "Machine Learning médica", 
-    "Deep Learning medicina", "Radiômica", "Saúde 4.0", "Big Data em Saúde"
+    "Deep Learning medicina", "Saúde Digital", "Big Data em Saúde"
 ]
 
 EIXO_GESTAO = [
     "Avaliação de Tecnologias em Saúde", "Inovação Hospitalar", 
-    "Pesquisa Clínica", "Proadi-SUS", "HealthTech", "Soberania Sanitária",
-    "FAPERGS", "CNPq", "Ministério da Saúde Brasil"
+    "Pesquisa Clínica", "Proadi-SUS", "HealthTech", 
+    "CNPq", "FAPERGS", "Ministério da Saúde"
 ]
 
 def criar_sessao_robusta():
@@ -53,139 +52,195 @@ def criar_sessao_robusta():
 
 def analisar_site_fixo(nome, url, session):
     try:
-        resp = session.get(url, timeout=20)
+        resp = session.get(url, timeout=15)
         if resp.status_code != 200:
             return (f"{nome}: Erro {resp.status_code}", "orange")
         soup = BeautifulSoup(resp.content, 'html.parser')
         texto = soup.get_text().lower()
-        if any(x in texto for x in ["edital", "chamada", "inscrições abertas"]):
-            return ("✅", f"{nome}: Possível edital aberto detectado.", "green")
-        return ("ℹ️", f"{nome}: Sem termos de abertura hoje.", "#777")
+        if any(x in texto for x in ["edital", "chamada", "inscrições abertas", "publicado"]):
+            return ("✅", f"{nome}: Termos de edital detectados na página.", "green")
+        return ("ℹ️", f"{nome}: Página acessível, sem novidades óbvias.", "#777")
     except:
         return ("❌", f"{nome}: Falha de conexão.", "red")
 
 def consultar_ia(titulo, snippet, tema):
-    if not model:
-        return f"Resultado automático (Sem IA): {titulo}"
+    """
+    O Filtro Supremo. Se não for bom, retorna None.
+    """
+    if not model: return None 
 
     prompt = f"""
-    Analise este resultado de busca sobre '{tema}':
+    Analise este resultado de busca para o tema '{tema}':
     Título: {titulo}
     Resumo: {snippet}
 
-    Tarefa:
-    1. Isso parece ser uma oportunidade REAL de financiamento, edital, bolsa ou evento acadêmico futuro (2025/2026)?
-    2. Se for apenas um artigo científico antigo, notícia velha ou irrelevante, responda apenas "NÃO".
-    3. Se for relevante, responda com uma frase curta resumindo a oportunidade.
+    Critérios de Aprovação:
+    1. DEVE ser uma oportunidade: Edital, Bolsa, Grant, Financiamento, Vaga de Doutorado/Pesquisa ou Chamada de Trabalhos.
+    2. DEVE ser atual (vigente para 2025 ou 2026).
+    3. NÃO pode ser venda de produtos, curso pago genérico, notícia velha, artigo de opinião ou rede social.
 
-    Responda em Português.
+    Responda:
+    - Se for irrelevante: Responda apenas "NÃO".
+    - Se for relevante: Responda com uma frase resumindo a oportunidade (Ex: "Grant de €50k para IA na Europa").
     """
     
     try:
         response = model.generate_content(prompt)
         texto_ia = response.text.strip()
         
-        if "NÃO" in texto_ia.upper() and len(texto_ia) < 10:
-            return None 
+        if "NÃO" in texto_ia.upper() or len(texto_ia) < 5:
+            return None
         
-        return texto_ia 
-    except Exception as e:
-        print(f"Erro na IA: {e}")
-        return titulo 
+        return texto_ia
+    except:
+        return None
 
-def buscar_por_eixo(nome_eixo, lista_temas, cor_titulo):
-    itens_html = ""
-    encontrou_algo = False
-    print(f"--- Processando: {nome_eixo} ---")
-
-    with DDGS() as ddgs:
-        for tema in lista_temas:
-            termo = f'"{tema}" (edital OR chamada OR grant OR bolsa) 2026'
+def realizar_busca(temas, query_suffix, gatilhos, label_log):
+    """
+    Função genérica para buscar (Brasil ou Mundo).
+    Retorna uma string HTML com os itens <li>.
+    """
+    html_items = ""
+    with DDGS(timeout=25) as ddgs:
+        for tema in temas:
+            # Monta a query: "Tema" (gatilho1 OR gatilho2) 2025..2026 sufixo
+            termo = f'"{tema}" ({gatilhos}) 2025..2026 {query_suffix}'
+            
             try:
-                time.sleep(5) # Aumentei um pouco a pausa para evitar erros
-                
-                # Tenta buscar
+                time.sleep(3) # Pausa para não ser bloqueado
                 results = list(ddgs.text(termo, max_results=2))
                 
                 if results:
                     for r in results:
-                        titulo = r.get('title', '')
+                        titulo = r.get('title', 'Sem título')
                         link = r.get('href', '')
                         snippet = r.get('body', '')
-                        
+
+                        # Filtro IA
                         analise = consultar_ia(titulo, snippet, tema)
                         
-                        if analise: 
-                            encontrou_algo = True
-                            print(f"  [IA Aprovou]: {titulo[:30]}...")
+                        if analise:
+                            print(f"  [{label_log} Aprovado]: {titulo[:40]}...")
                             
                             tag_pdf = ""
                             if link.lower().endswith('.pdf'):
-                                tag_pdf = " <span style='background:#d9534f;color:white;padding:2px 4px;border-radius:3px;font-size:10px;'>PDF</span>"
+                                tag_pdf = " 📄 <strong>[PDF]</strong>"
 
-                            itens_html += f"""
-                                <li style="margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px;">
-                                    <div style="font-weight:bold; color:#444;">{tema}:</div>
-                                    <a href="{link}" style="color:#007bff; text-decoration:none; font-weight:bold;">{titulo}</a>{tag_pdf}
-                                    <div style="font-size:13px; color:#555; margin-top:2px;">🤖 <em>{analise}</em></div>
+                            html_items += f"""
+                                <li style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed #eee;">
+                                    <a href="{link}" style="font-size: 14px; color: #007bff; text-decoration: none; font-weight: 600;">
+                                        {titulo}
+                                    </a>{tag_pdf}
+                                    <div style="font-size: 12px; color: #444; margin-top: 3px;">
+                                        🤖 {analise}
+                                    </div>
                                 </li>
                             """
-                        else:
-                            print(f"  [IA Rejeitou]: {titulo[:30]}...")
-
             except Exception as e:
-                print(f"Erro busca '{tema}': {e}")
+                print(f"Erro em {label_log} / {tema}: {e}")
                 continue
+    return html_items
 
-    if not encontrou_algo:
+def buscar_por_eixo(nome_eixo, lista_temas, cor_titulo):
+    print(f"--- Iniciando Eixo: {nome_eixo} ---")
+    
+    # 1. Busca BRASIL
+    # Gatilhos em PT, restrito ao domínio .br
+    html_br = realizar_busca(
+        lista_temas, 
+        "site:.br", 
+        "edital OR chamada pública OR bolsa pesquisa OR processo seletivo", 
+        "BR"
+    )
+
+    # 2. Busca INTERNACIONAL
+    # Gatilhos em EN, EXCLUINDO domínio .br (-site:.br)
+    html_world = realizar_busca(
+        lista_temas, 
+        "-site:.br", 
+        "grant OR research funding OR phd position OR call for papers", 
+        "WORLD"
+    )
+
+    # Se não achou nada em lugar nenhum, não retorna o bloco do eixo
+    if not html_br and not html_world:
         return ""
 
-    return f"""
-    <div style="margin-bottom: 20px; border: 1px solid {cor_titulo}; border-radius: 8px; overflow: hidden;">
-        <div style="background-color: {cor_titulo}; color: white; padding: 10px; font-weight: bold;">
+    # Monta o HTML do Eixo
+    conteudo_eixo = f"""
+    <div style="margin-bottom: 25px; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; font-family: sans-serif;">
+        <div style="background-color: {cor_titulo}; color: white; padding: 10px 15px; font-weight: bold;">
             {nome_eixo}
         </div>
         <div style="padding: 15px; background-color: #fff;">
-            <ul style="padding-left: 0; list-style: none; margin: 0;">
-                {itens_html}
-            </ul>
-        </div>
-    </div>
     """
+
+    if html_br:
+        conteudo_eixo += f"""
+            <div style="margin-bottom: 15px;">
+                <div style="font-size: 11px; font-weight: bold; color: #666; text-transform: uppercase; border-bottom: 2px solid #eee; margin-bottom: 8px;">
+                    Brasil
+                </div>
+                <ul style="padding-left: 0; list-style: none; margin: 0;">{html_br}</ul>
+            </div>
+        """
+    
+    if html_world:
+        conteudo_eixo += f"""
+            <div>
+                <div style="font-size: 11px; font-weight: bold; color: #666; text-transform: uppercase; border-bottom: 2px solid #eee; margin-bottom: 8px;">
+                    Internacional
+                </div>
+                <ul style="padding-left: 0; list-style: none; margin: 0;">{html_world}</ul>
+            </div>
+        """
+
+    conteudo_eixo += "</div></div>"
+    return conteudo_eixo
 
 def executar_sentinela():
     session = criar_sessao_robusta()
     
-    # Sites Fixos (FAPERGS removida daqui pois foi para a busca inteligente no Eixo Gestão)
-    dou = analisar_site_fixo("DOU", "https://www.in.gov.br/leiturajornal", session)
+    # Status Fixo (DOU)
+    dou = analisar_site_fixo("DOU (Pesquisa)", "https://www.in.gov.br/leiturajornal", session)
     
-    # Busca IA
-    html_nuclear = buscar_por_eixo("☢️ Nuclear & Radioproteção", EIXO_NUCLEAR, "#6f42c1")
-    html_ia = buscar_por_eixo("💻 IA & Saúde Digital", EIXO_IA_SAUDE, "#0d6efd")
-    html_gestao = buscar_por_eixo("🏥 Gestão & Inovação", EIXO_GESTAO, "#198754")
+    # Busca Inteligente por Eixos
+    html_nuclear = buscar_por_eixo("☢️ Nuclear & Física Médica", EIXO_NUCLEAR, "#8e44ad") # Roxo
+    html_ia = buscar_por_eixo("💻 Inteligência Artificial", EIXO_IA_SAUDE, "#2980b9") # Azul
+    html_gestao = buscar_por_eixo("🏥 Gestão & Fomento", EIXO_GESTAO, "#27ae60") # Verde
 
-    conteudo_busca = html_nuclear + html_ia + html_gestao
-    if not conteudo_busca:
-        conteudo_busca = "<p style='text-align:center; color:#666;'>A IA analisou os resultados e não encontrou oportunidades de alta relevância hoje.</p>"
+    conteudo_principal = html_nuclear + html_ia + html_gestao
+    
+    if not conteudo_principal:
+        conteudo_principal = """
+        <div style="text-align: center; padding: 40px; color: #999; background: #f9f9f9; border-radius: 8px;">
+            <p><strong>Nenhuma oportunidade relevante detectada hoje.</strong></p>
+            <p style="font-size: 12px;">Os filtros de IA analisaram as buscas e descartaram resultados irrelevantes.</p>
+        </div>
+        """
 
     return f"""
     <!DOCTYPE html>
     <html>
-    <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
-        <div style="max-width: 700px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
-            <h2 style="color: #333; border-bottom: 2px solid #0d6efd; padding-bottom: 10px;">Sentinela</h2>
+    <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; padding: 20px; margin: 0;">
+        <div style="max-width: 650px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); overflow: hidden;">
             
-            <div style="background: #eef; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-                <strong>Status Portais:</strong><br>
-                {dou[0]} <a href="https://www.in.gov.br/leiturajornal" style="color:#333; text-decoration:none;">{dou[1]}</a>
+            <div style="background-color: #34495e; padding: 20px; text-align: center;">
+                <h2 style="color: #fff; margin: 0; font-size: 22px;">SENTINELA</h2>
+                <p style="color: #bdc3c7; margin: 5px 0 0 0; font-size: 12px;">Radar Diário de Oportunidades</p>
             </div>
 
-            <h3 style="color: #555;">Análise de Oportunidades (Via AI)</h3>
-            {conteudo_busca}
+            <div style="padding: 25px;">
+                <div style="margin-bottom: 25px; padding: 10px; background: #ecf0f1; border-radius: 6px; font-size: 13px;">
+                    {dou[0]} <a href="https://www.in.gov.br/leiturajornal" style="color: #2c3e50; text-decoration: none; font-weight: bold;">{dou[1]}</a>
+                </div>
+
+                {conteudo_principal}
+            </div>
             
-            <p style="text-align: center; font-size: 11px; color: #aaa; margin-top: 30px;">
-                Gerado por Sentinela v6.1 usando Google Gemini Flash
-            </p>
+            <div style="background-color: #eee; padding: 10px; text-align: center; font-size: 10px; color: #888;">
+                Filtro IA Ativo • Powered by Gemini Flash
+            </div>
         </div>
     </body>
     </html>
@@ -194,7 +249,7 @@ def executar_sentinela():
 def enviar_email(html_content):
     if not EMAIL_ORIGEM or not SENHA_APP: return
     msg = EmailMessage()
-    msg['Subject'] = 'Sentinela: Relatório diário'
+    msg['Subject'] = 'Sentinela: Radar de Oportunidades'
     msg['From'] = EMAIL_ORIGEM
     msg['To'] = EMAIL_DESTINO
     msg.add_alternative(html_content, subtype='html')
