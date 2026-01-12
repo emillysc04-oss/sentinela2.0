@@ -79,7 +79,7 @@ def consultar_ia(titulo, snippet, tema):
     Tarefa:
     1. Isso parece ser uma oportunidade REAL de financiamento, edital, bolsa ou evento acadêmico futuro (2025/2026)?
     2. Se for apenas um artigo científico antigo, notícia velha ou irrelevante, responda apenas "NÃO".
-    3. Se for relevante, responda com uma frase curta resumindo a oportunidade (Ex: "Edital de R$ 100 mil para projetos de IA").
+    3. Se for relevante, responda com uma frase curta resumindo a oportunidade e o prazo de submissão.
 
     Responda em Português.
     """
@@ -201,7 +201,7 @@ def executar_sentinela():
 def enviar_email(html_content):
     if not EMAIL_ORIGEM or not SENHA_APP: return
     msg = EmailMessage()
-    msg['Subject'] = 'Sentinela: Relatório de Inteligência'
+    msg['Subject'] = 'Sentinela: Relatório diário'
     msg['From'] = EMAIL_ORIGEM
     msg['To'] = EMAIL_DESTINO
     msg.add_alternative(html_content, subtype='html')
