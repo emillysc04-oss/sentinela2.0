@@ -18,7 +18,7 @@ GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
 # Configuração da IA (Gemini)
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash') # Modelo rápido e barato/grátis
+    model = genai.GenerativeModel('gemini-1.5-flash')
 else:
     model = None
     print("AVISO: GEMINI_API_KEY não encontrada. A IA não será usada.")
@@ -36,7 +36,8 @@ EIXO_IA_SAUDE = [
 
 EIXO_GESTAO = [
     "Avaliação de Tecnologias em Saúde", "Inovação Hospitalar", 
-    "Pesquisa Clínica", "Proadi-SUS", "HealthTech", "Soberania Sanitária"
+    "Pesquisa Clínica", "Proadi-SUS", "HealthTech", "Soberania Sanitária",
+    "FAPERGS", "CNPq", "Ministério da Saúde Brasil"
 ]
 
 def criar_sessao_robusta():
@@ -54,20 +55,16 @@ def analisar_site_fixo(nome, url, session):
     try:
         resp = session.get(url, timeout=20)
         if resp.status_code != 200:
-            return ( f"{nome}: Erro {resp.status_code}", "orange")
+            return (f"{nome}: Erro {resp.status_code}", "orange")
         soup = BeautifulSoup(resp.content, 'html.parser')
         texto = soup.get_text().lower()
         if any(x in texto for x in ["edital", "chamada", "inscrições abertas"]):
             return ("✅", f"{nome}: Possível edital aberto detectado.", "green")
-        return ( f"{nome}: Sem resltados abertura hoje.", "#777")
+        return ("ℹ️", f"{nome}: Sem termos de abertura hoje.", "#777")
     except:
         return ("❌", f"{nome}: Falha de conexão.", "red")
 
 def consultar_ia(titulo, snippet, tema):
-    """
-    Usa a IA para decidir se o link vale a pena.
-    Retorna: O resumo feito pela IA ou None se for irrelevante.
-    """
     if not model:
         return f"Resultado automático (Sem IA): {titulo}"
 
@@ -79,7 +76,7 @@ def consultar_ia(titulo, snippet, tema):
     Tarefa:
     1. Isso parece ser uma oportunidade REAL de financiamento, edital, bolsa ou evento acadêmico futuro (2025/2026)?
     2. Se for apenas um artigo científico antigo, notícia velha ou irrelevante, responda apenas "NÃO".
-    3. Se for relevante, responda com uma frase curta resumindo a oportunidade e o prazo de submissão.
+    3. Se for relevante, responda com uma frase curta resumindo a oportunidade.
 
     Responda em Português.
     """
@@ -89,12 +86,12 @@ def consultar_ia(titulo, snippet, tema):
         texto_ia = response.text.strip()
         
         if "NÃO" in texto_ia.upper() and len(texto_ia) < 10:
-            return None # IA decidiu que é lixo
+            return None 
         
-        return texto_ia # Retorna o resumo da IA
+        return texto_ia 
     except Exception as e:
         print(f"Erro na IA: {e}")
-        return titulo # Se a IA falhar, devolve o título original
+        return titulo 
 
 def buscar_por_eixo(nome_eixo, lista_temas, cor_titulo):
     itens_html = ""
@@ -103,24 +100,22 @@ def buscar_por_eixo(nome_eixo, lista_temas, cor_titulo):
 
     with DDGS() as ddgs:
         for tema in lista_temas:
-            # Busca mais ampla, deixa a IA filtrar
             termo = f'"{tema}" (edital OR chamada OR grant OR bolsa) 2026'
             try:
-                # Pausa para respeitar limites (Rate Limits da IA e do Buscador)
-                time.sleep(4) 
+                time.sleep(5) # Aumentei um pouco a pausa para evitar erros
                 
+                # Tenta buscar
                 results = list(ddgs.text(termo, max_results=2))
                 
                 if results:
                     for r in results:
                         titulo = r.get('title', '')
                         link = r.get('href', '')
-                        snippet = r.get('body', '') # O resumo que o buscador dá
+                        snippet = r.get('body', '')
                         
-                        # --- AQUI ENTRA A IA ---
                         analise = consultar_ia(titulo, snippet, tema)
                         
-                        if analise: # Só adiciona se a IA aprovou
+                        if analise: 
                             encontrou_algo = True
                             print(f"  [IA Aprovou]: {titulo[:30]}...")
                             
@@ -161,8 +156,7 @@ def buscar_por_eixo(nome_eixo, lista_temas, cor_titulo):
 def executar_sentinela():
     session = criar_sessao_robusta()
     
-    # Sites Fixos
-    # fapergs = analisar_site_fixo("FAPERGS", "https://fapergs.rs.gov.br/editais-abertos", session)
+    # Sites Fixos (FAPERGS removida daqui pois foi para a busca inteligente no Eixo Gestão)
     dou = analisar_site_fixo("DOU", "https://www.in.gov.br/leiturajornal", session)
     
     # Busca IA
@@ -179,11 +173,10 @@ def executar_sentinela():
     <html>
     <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
         <div style="max-width: 700px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
-            <h2 style="color: #333; border-bottom: 2px solid #0d6efd; padding-bottom: 10px;">Sentinela </h2>
+            <h2 style="color: #333; border-bottom: 2px solid #0d6efd; padding-bottom: 10px;">Sentinela</h2>
             
             <div style="background: #eef; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
                 <strong>Status Portais:</strong><br>
-                #{fapergs[0]} <a href="https://fapergs.rs.gov.br/editais-abertos" style="color:#333; text-decoration:none;">{fapergs[1]}</a><br>
                 {dou[0]} <a href="https://www.in.gov.br/leiturajornal" style="color:#333; text-decoration:none;">{dou[1]}</a>
             </div>
 
@@ -191,7 +184,7 @@ def executar_sentinela():
             {conteudo_busca}
             
             <p style="text-align: center; font-size: 11px; color: #aaa; margin-top: 30px;">
-                Gerado por Sentinela v6.0 usando Google Gemini Flash
+                Gerado por Sentinela v6.1 usando Google Gemini Flash
             </p>
         </div>
     </body>
