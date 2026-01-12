@@ -162,7 +162,7 @@ def executar_sentinela():
     session = criar_sessao_robusta()
     
     # Sites Fixos
-    #fapergs = analisar_site_fixo("FAPERGS", "https://fapergs.rs.gov.br/editais-abertos", session)
+    # fapergs = analisar_site_fixo("FAPERGS", "https://fapergs.rs.gov.br/editais-abertos", session)
     dou = analisar_site_fixo("DOU", "https://www.in.gov.br/leiturajornal", session)
     
     # Busca IA
@@ -183,7 +183,7 @@ def executar_sentinela():
             
             <div style="background: #eef; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
                 <strong>Status Portais:</strong><br>
-                {fapergs[0]} <a href="https://fapergs.rs.gov.br/editais-abertos" style="color:#333; text-decoration:none;">{fapergs[1]}</a><br>
+                #{fapergs[0]} <a href="https://fapergs.rs.gov.br/editais-abertos" style="color:#333; text-decoration:none;">{fapergs[1]}</a><br>
                 {dou[0]} <a href="https://www.in.gov.br/leiturajornal" style="color:#333; text-decoration:none;">{dou[1]}</a>
             </div>
 
