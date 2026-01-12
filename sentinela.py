@@ -7,7 +7,8 @@ from email.message import EmailMessage
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
-from ddgs import DDGS 
+# CORREÇÃO AQUI: Voltamos para o import clássico que é compatível com o GitHub Actions atual
+from duckduckgo_search import DDGS 
 
 # --- CONFIGURAÇÕES ---
 EMAIL_ORIGEM = os.environ.get('EMAIL_REMETENTE')
@@ -26,7 +27,6 @@ else:
 # Adicione aqui os links que você quer monitorar sempre
 SITES_FIXOS = [
     ("DOU (Pesquisa)", "https://www.in.gov.br/leiturajornal"),
-    # Exemplo: ("Editais UFCSPA", "https://www.ufcspa.edu.br/editais"),
 ]
 
 # --- EIXOS TEMÁTICOS (BUSCA ATIVA) ---
@@ -62,7 +62,7 @@ def analisar_conteudo_site_ia(nome_site, texto_site):
     """
     if not model: return None
 
-    # Corta o texto para não estourar o limite da IA (primeiros 3000 caracteres costumam ter as manchetes)
+    # Corta o texto para não estourar o limite da IA
     texto_resumido = texto_site[:3000]
 
     prompt = f"""
@@ -111,7 +111,6 @@ def analisar_site_fixo(nome, url, session):
             if analise_ia:
                 return ("✅", nome, url, analise_ia, "green")
             else:
-                # Achou a palavra "edital" mas a IA disse que não é nada novo
                 return ("ℹ️", nome, url, "Site acessível (IA não detectou novidades urgentes)", "#555")
         
         return ("ℹ️", nome, url, "Site acessível.", "#555")
@@ -126,7 +125,7 @@ def consultar_ia_busca(titulo, snippet, tema):
     Analise este resultado de busca sobre '{tema}':
     Título: {titulo} | Resumo: {snippet}
     Responda APENAS:
-    - "NÃO" se for irrelevante, antigo ou venda.
+    - "NÃO" se for irrelevante, antigo, venda ou rede social.
     - Um resumo de 1 linha se for oportunidade real (Edital/Bolsa/Grant 2025-2026).
     """
     try:
@@ -137,11 +136,12 @@ def consultar_ia_busca(titulo, snippet, tema):
 
 def realizar_busca(temas, query_pattern, label_log):
     html_items = ""
+    # Instancia DDGS com timeout seguro
     with DDGS(timeout=25) as ddgs:
         for tema in temas:
             termo = query_pattern.format(tema)
             try:
-                time.sleep(2)
+                time.sleep(2) # Pausa anti-bloqueio
                 results = list(ddgs.text(termo, max_results=2))
                 if results:
                     for r in results:
@@ -161,8 +161,9 @@ def realizar_busca(temas, query_pattern, label_log):
 
 def buscar_por_eixo(nome_eixo, lista_temas, cor_titulo):
     print(f"--- Eixo: {nome_eixo} ---")
-    html_br = realizar_busca(lista_temas, '"{}" (edital OR chamada) 2025..2026 site:.br', "BR")
-    html_world = realizar_busca(lista_temas, '"{}" (grant OR funding) 2025..2026 -site:.br', "WORLD")
+    # Busca Brasil e Mundo
+    html_br = realizar_busca(lista_temas, '"{}" (edital OR chamada OR processo seletivo) 2025..2026 site:.br', "BR")
+    html_world = realizar_busca(lista_temas, '"{}" (grant OR funding OR phd position) 2025..2026 -site:.br', "WORLD")
     
     if not html_br and not html_world: return ""
     
@@ -181,10 +182,7 @@ def executar_sentinela():
     # 1. PROCESSAR SITES FIXOS
     html_fixos = ""
     for nome, url in SITES_FIXOS:
-        # Pega o resultado (Ícone, Nome, Link, Resumo, Cor)
         res = analisar_site_fixo(nome, url, session)
-        
-        # Monta o HTML do item fixo
         html_fixos += f"""
         <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
             <div style="font-size: 14px;">
