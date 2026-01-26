@@ -27,66 +27,55 @@ ESTILO = """
   .footer { background: #f5f5f5; padding: 15px; text-align: center; font-size: 11px; color: #999; border-top: 1px solid #ddd; }
 """
 
-TEMAS = [
-    "Radioterapia", "Radiofármacos", "Medicina Nuclear", "Física Médica", "Dosimetria", 
-    "Proteção Radiológica", "Inteligência Artificial saúde", "Machine Learning médica", 
-    "Deep Learning medicina", "Avaliação de Tecnologias em Saúde", "Inovação Hospitalar", 
-    "CNPq", "FAPERGS", "Ministério da Saúde", "Proadi-SUS"]
+# --- ATENÇÃO: AQUI ESTÃO OS DADOS FALSOS PARA TESTE ---
+# Eu criei manualmente o HTML simulando o que o robô faria.
 
-def consultar_ia(titulo, resumo):
-    try: 
-        prompt = f"Título: {titulo}\nResumo: {resumo}\nÉ oportunidade acadêmica vigente (2025/2026)? Responda 'NÃO' ou resumo em 1 frase."
-        res = MODELO.generate_content(prompt).text.strip()
-        return None if "NÃO" in res.upper() or len(res) < 5 else res
-    except: return None
+RESULTADO_FAKE_BR = """
+<li>
+    <a href='https://www.gov.br/cnpq'>Edital Universal CNPq 2026 - Chamada para Projetos em Física Médica</a> <span class='pdf-tag'>PDF</span>
+    <div class='ai'><span class='label-ai'>Análise IA:</span> Edital confirmado para financiamento de projetos de pesquisa em tecnologia nuclear com vigência até dezembro de 2026.</div>
+</li>
+<li>
+    <a href='https://www.fapergs.rs.gov.br'>Bolsa de Iniciação Científica FAPERGS - Saúde Digital</a>
+    <div class='ai'><span class='label-ai'>Análise IA:</span> Chamada aberta para bolsistas de graduação atuarem em projetos de Inteligência Artificial aplicada à saúde no RS.</div>
+</li>
+"""
 
-def buscar(sufixo_query):
-    html = ""
-    with DDGS(timeout=30) as ddgs:
-        for tema in TEMAS:
-            try:
-                time.sleep(1.5)
-                for r in list(ddgs.text(f'"{tema}" {sufixo_query}', max_results=2)):
-                    analise = consultar_ia(r.get('title',''), r.get('body',''))
-                    if analise:
-                        link = r.get('href','#')
-                        pdf = " <span class='pdf-tag'>PDF</span>" if link.endswith('.pdf') else ""
-                        html += f"""
-                        <li>
-                            <a href='{link}'>{r.get('title')}</a>{pdf}
-                            <div class='ai'><span class='label-ai'>Análise IA:</span> {analise}</div>
-                        </li>"""
-            except: continue
-    return html
+RESULTADO_FAKE_WORLD = """
+<li>
+    <a href='https://www.nih.gov'>NIH Grant for Radiotherapy Quality Assurance</a>
+    <div class='ai'><span class='label-ai'>Análise IA:</span> Oportunidade de financiamento internacional para desenvolvimento de novos protocolos de dosimetria, submissões até maio de 2026.</div>
+</li>
+"""
 
 if __name__ == "__main__":
-    print(">>> Iniciando Varredura...")
-    br = buscar('(edital OR chamada OR seleção OR bolsa) 2025..2026 site:.br')
-    world = buscar('(grant OR funding OR phd position) 2025..2026 -site:.br')
+    print(">>> MODO DE TESTE: Gerando e-mail com dados fictícios...")
+
+    # Em vez de buscar na web, usamos as variáveis falsas acima
+    br = RESULTADO_FAKE_BR
+    world = RESULTADO_FAKE_WORLD
 
     corpo = ""
-    if br: corpo += f"<div class='section'><div class='section-title'>BRASIL | Oportunidades Nacionais</div><ul>{br}</ul></div>"
-    if world: corpo += f"<div class='section'><div class='section-title'>INTERNACIONAL | Oportunidades Globais</div><ul>{world}</ul></div>"
+    if br: corpo += f"<div class='section'><div class='section-title'>BRASIL | Oportunidades Nacionais (SIMULAÇÃO)</div><ul>{br}</ul></div>"
+    if world: corpo += f"<div class='section'><div class='section-title'>INTERNACIONAL | Oportunidades Globais (SIMULAÇÃO)</div><ul>{world}</ul></div>"
     
-    if not corpo:
-        corpo = "<p style='text-align:center; padding:40px; color:#999; font-size:12px;'>Nenhuma oportunidade relevante encontrada hoje.</p>"
-
     html_final = f"""
     <html><head><style>{ESTILO}</style></head>
     <body>
         <div class='box'>
             <div class='header'><h3>SISTEMA DE MONITORAMENTO SENTINELA</h3></div>
             {corpo}
-            <div class='footer'>Relatório Automático Diário</div>
+            <div class='footer'>Relatório de Teste de Layout</div>
         </div>
     </body></html>
     """
     
     print(f">>> Enviando para: {', '.join(DESTINOS)}")
     msg = EmailMessage()
-    msg['Subject'], msg['From'], msg['To'] = 'Sistema Sentinela: Relatório Diário', EMAIL, ', '.join(DESTINOS)
+    msg['Subject'], msg['From'], msg['To'] = 'TESTE: Visualização do Sistema Sentinela', EMAIL, ', '.join(DESTINOS)
     msg.add_alternative(html_final, subtype='html')
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(EMAIL, SENHA)
         smtp.send_message(msg)
+    print("✅ E-mail de teste enviado com sucesso!")
