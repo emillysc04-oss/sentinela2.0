@@ -205,7 +205,6 @@ if __name__ == "__main__":
         <div class='box'>
             <div class='header'>
                 <h3>SISTEMA DE MONITORAMENTO SENTINELA</h3>
-                <p>Relatório Diário de Inteligência</p>
             </div>
             {corpo}
             <div class='footer'>
