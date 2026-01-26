@@ -1,19 +1,58 @@
-import os, time, smtplib
+import os, time, smtplib, json
 import google.generativeai as genai
+import gspread
 from email.message import EmailMessage
 from duckduckgo_search import DDGS
 
+# --- 1. CONFIGURAÇÕES ---
 EMAIL = os.environ.get('EMAIL_REMETENTE')
 SENHA = os.environ.get('SENHA_APP')
 KEY = os.environ.get('GEMINI_API_KEY')
-DESTINOS = [e.strip() for e in (os.environ.get('EMAIL_DESTINO') or EMAIL).replace('\n', ',').split(',') if e.strip()]
+SHEETS_JSON = os.environ.get('GOOGLE_CREDENTIALS')
 
 genai.configure(api_key=KEY)
 MODELO = genai.GenerativeModel('gemini-1.5-flash')
 
-# DESIGN HCPA (Manual de Identidade Visual)
-# Verde Institucional: #009586
-# Fonte: Família Sans-Serif Limpa
+# --- 2. FUNÇÃO DE LISTA DE E-MAILS (VIA SHEETS - COLUNA C) ---
+def obter_lista_emails():
+    """
+    Conecta no Google Sheets e busca a lista de destinatários na COLUNA C.
+    """
+    lista_final = []
+    
+    if SHEETS_JSON:
+        try:
+            # Autentica e abre a planilha
+            credenciais = json.loads(SHEETS_JSON)
+            gc = gspread.service_account_from_dict(credenciais)
+            sh = gc.open("Sentinela Emails")
+            
+            # ATENÇÃO: Mudamos para o índice 3 (Coluna C)
+            valores = sh.sheet1.col_values(3)
+            
+            # Filtra apenas o que parece ser e-mail válido
+            for email in valores:
+                if '@' in email and '.' in email:
+                    lista_final.append(email.strip())
+            
+            print(f">>> Sucesso: {len(lista_final)} e-mails carregados da Coluna C.")
+            
+        except Exception as e:
+            print(f"⚠️ Erro ao ler Google Sheets: {e}")
+            print(">>> Usando modo de segurança (apenas remetente).")
+    
+    # Se a lista estiver vazia, manda para o dono
+    if not lista_final:
+        lista_final = [EMAIL]
+        
+    return lista_final
+
+# Carrega a lista no início
+DESTINOS = obter_lista_emails()
+
+# --- 3. DESIGN HCPA (Manual de Identidade Visual) ---
+# [cite_start]Verde Institucional: #009586 [cite: 30]
+# [cite_start]Fonte: Família Sans-Serif Limpa [cite: 5]
 ESTILO = """
   body { 
     font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
@@ -32,7 +71,7 @@ ESTILO = """
   /* Cabeçalho Centralizado */
   .header { 
     padding: 30px 0; 
-    text-align: center; /* Centralizado conforme solicitado */
+    text-align: center;
     border-bottom: 1px solid #eeeeee;
   }
   .header h3 { 
@@ -120,6 +159,7 @@ TEMAS = [
     "Deep Learning medicina", "Avaliação de Tecnologias em Saúde", "Inovação Hospitalar", 
     "CNPq", "FAPERGS", "Ministério da Saúde", "Proadi-SUS"]
 
+# --- 4. INTELIGÊNCIA E BUSCA ---
 def consultar_ia(titulo, resumo):
     try: 
         prompt = f"Título: {titulo}\nResumo: {resumo}\nÉ oportunidade acadêmica vigente (2025/2026)? Responda 'NÃO' ou resumo em 1 frase."
@@ -146,6 +186,7 @@ def buscar(sufixo_query):
             except: continue
     return html
 
+# --- 5. EXECUÇÃO ---
 if __name__ == "__main__":
     print(">>> Iniciando Varredura HCPA...")
     br = buscar('(edital OR chamada OR seleção OR bolsa) 2025..2026 site:.br')
@@ -175,11 +216,16 @@ if __name__ == "__main__":
     </body></html>
     """
     
-    print(f">>> Enviando para: {', '.join(DESTINOS)}")
+    print(f">>> Enviando para {len(DESTINOS)} destinatários via Bcc.")
+    
     msg = EmailMessage()
-    msg['Subject'], msg['From'], msg['To'] = 'Sistema Sentinela: Relatório Diário', EMAIL, ', '.join(DESTINOS)
+    msg['Subject'] = 'Sistema Sentinela: Relatório Diário'
+    msg['From'] = EMAIL
+    msg['To'] = EMAIL 
+    msg['Bcc'] = ', '.join(DESTINOS)
     msg.add_alternative(html_final, subtype='html')
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(EMAIL, SENHA)
         smtp.send_message(msg)
+    print("✅ E-mail enviado!")
