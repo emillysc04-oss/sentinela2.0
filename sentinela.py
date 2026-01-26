@@ -15,6 +15,7 @@ ESTILO = """
   body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f5f5; padding: 20px; color: #333; }
   .box { background: white; max-width: 700px; margin: 0 auto; border: 1px solid #ddd; border-radius: 5px; overflow: hidden; }
   .header { background: #333; color: white; padding: 20px; text-align: center; letter-spacing: 1px; }
+  .header h3 { margin: 0; font-size: 18px; text-transform: uppercase; }
   .section { padding: 25px; border-bottom: 1px solid #eee; }
   .section-title { font-size: 13px; font-weight: bold; color: #444; text-transform: uppercase; margin-bottom: 15px; border-left: 4px solid #0056b3; padding-left: 10px; }
   ul { padding: 0; list-style: none; margin: 0; }
@@ -49,7 +50,6 @@ def buscar(sufixo_query):
                     analise = consultar_ia(r.get('title',''), r.get('body',''))
                     if analise:
                         link = r.get('href','#')
-                        # Tag PDF textual, sem ícone
                         pdf = " <span class='pdf-tag'>PDF</span>" if link.endswith('.pdf') else ""
                         html += f"""
                         <li>
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     <html><head><style>{ESTILO}</style></head>
     <body>
         <div class='box'>
-            <div class='header'><h3>SENTINELA</h3></div>
+            <div class='header'><h3>SISTEMA DE MONITORAMENTO SENTINELA</h3></div>
             {corpo}
             <div class='footer'>Relatório Automático Diário</div>
         </div>
@@ -84,7 +84,7 @@ if __name__ == "__main__":
     
     print(f">>> Enviando para: {', '.join(DESTINOS)}")
     msg = EmailMessage()
-    msg['Subject'], msg['From'], msg['To'] = 'Sentinela: Relatório Diário', EMAIL, ', '.join(DESTINOS)
+    msg['Subject'], msg['From'], msg['To'] = 'Sistema Sentinela: Relatório Diário', EMAIL, ', '.join(DESTINOS)
     msg.add_alternative(html_final, subtype='html')
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
