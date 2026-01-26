@@ -11,40 +11,41 @@ DESTINOS = [e.strip() for e in (os.environ.get('EMAIL_DESTINO') or EMAIL).replac
 genai.configure(api_key=KEY)
 MODELO = genai.GenerativeModel('gemini-1.5-flash')
 
-# DESIGN BASEADO NO MANUAL DE IDENTIDADE VISUAL HCPA (PDF)
-# Cor Primária (Verde Turquesa Institucional): #009586
-# Fonte: Família Sans-Serif moderna (Segoe UI / Helvetica Neue)
+# DESIGN HCPA (Manual de Identidade Visual)
+# Verde Institucional: #009586
+# Fonte: Família Sans-Serif Limpa
 ESTILO = """
   body { 
     font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-    background-color: #ffffff; /* Fundo branco conforme slide 15 do manual */
+    background-color: #ffffff; 
     padding: 30px; 
-    color: #404040; /* Cinza escuro para texto, não preto puro (mais suave) */
-    line-height: 1.6; /* Mais espaçamento entre linhas para "respirar" */
+    color: #404040; 
+    line-height: 1.6;
   }
   
   .box { 
     max-width: 700px; 
     margin: 0 auto; 
-    border-top: 6px solid #009586; /* Detalhe superior minimalista */
+    border-top: 6px solid #009586; 
   }
   
-  /* Cabeçalho Limpo */
+  /* Cabeçalho Centralizado */
   .header { 
     padding: 30px 0; 
-    text-align: left; 
+    text-align: center; /* Centralizado conforme solicitado */
     border-bottom: 1px solid #eeeeee;
   }
   .header h3 { 
     margin: 0; 
-    font-size: 24px; 
-    color: #009586; /* Título no Verde HCPA */
-    font-weight: 300; /* Fonte mais fina e elegante */
+    font-size: 22px; 
+    color: #009586; 
+    font-weight: 300; 
     letter-spacing: 0.5px;
+    text-transform: uppercase;
   }
   .header p {
     margin: 5px 0 0 0;
-    font-size: 14px;
+    font-size: 13px;
     color: #888;
   }
   
@@ -59,7 +60,7 @@ ESTILO = """
     letter-spacing: 1px;
     margin-bottom: 20px; 
     display: inline-block;
-    border-bottom: 2px solid #009586; /* Sublinhado verde discreto */
+    border-bottom: 2px solid #009586;
     padding-bottom: 5px;
   }
   
@@ -71,7 +72,7 @@ ESTILO = """
     color: #009586; 
     text-decoration: none; 
     font-weight: 600; 
-    font-size: 18px; /* Título do link maior */
+    font-size: 18px;
     display: block;
     margin-bottom: 5px;
   }
@@ -81,9 +82,9 @@ ESTILO = """
   .ai { 
     font-size: 14px; 
     color: #555; 
-    background-color: #f8fcfb; /* Fundo muito levemente esverdeado */
+    background-color: #f8fcfb; 
     padding: 15px; 
-    border-left: 3px solid #009586; /* Identidade visual na borda */
+    border-left: 3px solid #009586;
     border-radius: 0 4px 4px 0;
   }
   .label-ai { 
@@ -136,7 +137,6 @@ def buscar(sufixo_query):
                     analise = consultar_ia(r.get('title',''), r.get('body',''))
                     if analise:
                         link = r.get('href','#')
-                        # Tag PDF sólida (fundo preenchido)
                         pdf = " <span class='pdf-tag'>PDF</span>" if link.endswith('.pdf') else ""
                         html += f"""
                         <li>
@@ -163,8 +163,8 @@ if __name__ == "__main__":
     <body>
         <div class='box'>
             <div class='header'>
-                <h3>SISTEMA SENTINELA</h3>
-                <p>Monitoramento Diário de Oportunidades</p>
+                <h3>SISTEMA DE MONITORAMENTO SENTINELA</h3>
+                <p>Relatório Diário de Inteligência</p>
             </div>
             {corpo}
             <div class='footer'>
@@ -183,4 +183,3 @@ if __name__ == "__main__":
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(EMAIL, SENHA)
         smtp.send_message(msg)
-    print("✅ E-mail enviado!")
