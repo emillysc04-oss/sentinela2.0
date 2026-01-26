@@ -3,15 +3,14 @@ import google.generativeai as genai
 from email.message import EmailMessage
 from duckduckgo_search import DDGS
 
-# --- 1. CONFIGURAÇÃO ---
-EMAIL, SENHA, KEY = os.environ.get('EMAIL_REMETENTE'), os.environ.get('SENHA_APP'), os.environ.get('GEMINI_API_KEY')
-# Lista de destinos (ou fallback para o remetente)
+EMAIL = os.environ.get('EMAIL_REMETENTE')
+SENHA = os.environ.get('SENHA_APP')
+KEY = os.environ.get('GEMINI_API_KEY')
 DESTINOS = [e.strip() for e in (os.environ.get('EMAIL_DESTINO') or EMAIL).replace('\n', ',').split(',') if e.strip()]
 
 genai.configure(api_key=KEY)
 MODELO = genai.GenerativeModel('gemini-1.5-flash')
 
-# CSS (Visual Limpo e Corporativo)
 ESTILO = """
   body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f5f5; padding: 20px; color: #333; }
   .box { background: white; max-width: 700px; margin: 0 auto; border: 1px solid #ddd; border-radius: 5px; overflow: hidden; }
@@ -27,15 +26,12 @@ ESTILO = """
   .footer { background: #f5f5f5; padding: 15px; text-align: center; font-size: 11px; color: #999; border-top: 1px solid #ddd; }
 """
 
-# LISTA ÚNICA DE TEMAS
 TEMAS = [
     "Radioterapia", "Radiofármacos", "Medicina Nuclear", "Física Médica", "Dosimetria", 
     "Proteção Radiológica", "Inteligência Artificial saúde", "Machine Learning médica", 
     "Deep Learning medicina", "Avaliação de Tecnologias em Saúde", "Inovação Hospitalar", 
-    "CNPq", "FAPERGS", "Ministério da Saúde", "Proadi-SUS"
-]
+    "CNPq", "FAPERGS", "Ministério da Saúde", "Proadi-SUS"]
 
-# --- 2. INTELIGÊNCIA ARTIFICIAL ---
 def consultar_ia(titulo, resumo):
     try: 
         prompt = f"Título: {titulo}\nResumo: {resumo}\nÉ oportunidade acadêmica vigente (2025/2026)? Responda 'NÃO' ou resumo em 1 frase."
@@ -43,7 +39,6 @@ def consultar_ia(titulo, resumo):
         return None if "NÃO" in res.upper() or len(res) < 5 else res
     except: return None
 
-# --- 3. BUSCA ---
 def buscar(sufixo_query):
     html = ""
     with DDGS(timeout=30) as ddgs:
@@ -64,13 +59,11 @@ def buscar(sufixo_query):
             except: continue
     return html
 
-# --- 4. EXECUÇÃO ---
 if __name__ == "__main__":
     print(">>> Iniciando Varredura...")
     br = buscar('(edital OR chamada OR seleção OR bolsa) 2025..2026 site:.br')
     world = buscar('(grant OR funding OR phd position) 2025..2026 -site:.br')
 
-    # Monta o corpo do e-mail
     corpo = ""
     if br: corpo += f"<div class='section'><div class='section-title'>BRASIL | Oportunidades Nacionais</div><ul>{br}</ul></div>"
     if world: corpo += f"<div class='section'><div class='section-title'>INTERNACIONAL | Oportunidades Globais</div><ul>{world}</ul></div>"
@@ -89,7 +82,6 @@ if __name__ == "__main__":
     </body></html>
     """
     
-    # Envio
     print(f">>> Enviando para: {', '.join(DESTINOS)}")
     msg = EmailMessage()
     msg['Subject'], msg['From'], msg['To'] = 'Sentinela: Relatório Diário', EMAIL, ', '.join(DESTINOS)
@@ -98,4 +90,3 @@ if __name__ == "__main__":
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(EMAIL, SENHA)
         smtp.send_message(msg)
-    print("✅ Sucesso!")
