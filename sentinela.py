@@ -1,8 +1,11 @@
-import os, time, smtplib, json
+import os, time, smtplib, json, warnings
 import google.generativeai as genai
 import gspread
 from email.message import EmailMessage
 from duckduckgo_search import DDGS
+
+# Ignorar avisos de atualização de bibliotecas para limpar o log
+warnings.filterwarnings("ignore")
 
 # --- 1. CONFIGURAÇÕES ---
 EMAIL = os.environ.get('EMAIL_REMETENTE')
@@ -11,7 +14,7 @@ KEY = os.environ.get('GEMINI_API_KEY')
 SHEETS_JSON = os.environ.get('GOOGLE_CREDENTIALS')
 
 genai.configure(api_key=KEY)
-# Forçamos o Gemini a responder SEMPRE em JSON para não quebrar o código
+# Configuração para resposta JSON
 MODELO = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
 
 # --- 2. FUNÇÃO DE LISTA DE E-MAILS ---
@@ -62,14 +65,14 @@ TEMAS = [
     "CNPq", "FAPERGS", "Ministério da Saúde", "Proadi-SUS"
 ]
 
-# --- 4. INTELIGÊNCIA EM LOTE (EDITOR CHEFE - SEM LIMITES) ---
+# --- 4. INTELIGÊNCIA EM LOTE ---
 def coletar_bruto(sufixo):
     """Coleta tudo o que encontrar no DuckDuckGo."""
     resultados = []
     with DDGS(timeout=30) as ddgs:
         for tema in TEMAS:
             try:
-                # Coleta 4 resultados por tema (aprox 48 links no total)
+                # Coleta 4 resultados por tema
                 for r in list(ddgs.text(f'"{tema}" {sufixo}', max_results=4)):
                     resultados.append(f"Titulo: {r.get('title')} | Link: {r.get('href')} | Resumo: {r.get('body')}")
             except: continue
@@ -79,7 +82,6 @@ def curadoria_ia(lista_bruta):
     """Envia a lista para o Gemini filtrar e devolver TUDO o que for bom."""
     if not lista_bruta: return ""
     
-    # Limitamos a entrada para evitar erro de tamanho, mas 80 itens é bastante coisa
     texto_entrada = "\n".join(lista_bruta[:80])
     
     prompt = f"""
@@ -124,4 +126,17 @@ if __name__ == "__main__":
     raw_br = coletar_bruto('(edital OR chamada OR seleção OR bolsa) 2025..2026 site:.br')
     
     print(">>> 2. Coletando dados brutos (Mundo)...")
-    raw_world = coletar_
+    # AQUI ESTAVA O ERRO, AGORA ESTÁ CORRIGIDO:
+    raw_world = coletar_bruto('(grant OR funding OR phd position) 2025..2026 -site:.br')
+
+    print(">>> 3. IA Sentinela analisando e filtrando...")
+    html_br = curadoria_ia(raw_br)
+    html_world = curadoria_ia(raw_world)
+
+    corpo = ""
+    if html_br: corpo += f"<div class='section'><div class='section-title'>Oportunidades Nacionais</div><ul>{html_br}</ul></div>"
+    if html_world: corpo += f"<div class='section'><div class='section-title'>Oportunidades Internacionais</div><ul>{html_world}</ul></div>"
+    
+    if not corpo: corpo = "<p style='text-align:center; padding:40px; color:#999;'>Nenhuma oportunidade relevante encontrada hoje.</p>"
+
+    html_final
