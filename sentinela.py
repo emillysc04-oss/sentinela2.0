@@ -1,9 +1,9 @@
-import os, time, smtplib, json, warnings
+import os, time, smtplib, json, requests, warnings
 import google.generativeai as genai
 import gspread
 from email.message import EmailMessage
 
-# --- 0. CONFIGURAÇÕES INICIAIS ---
+# --- 0. CONFIGURAÇÕES ---
 warnings.filterwarnings("ignore")
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
 
@@ -11,20 +11,16 @@ EMAIL = os.environ.get('EMAIL_REMETENTE')
 SENHA = os.environ.get('SENHA_APP')
 KEY = os.environ.get('GEMINI_API_KEY')
 SHEETS_JSON = os.environ.get('GOOGLE_CREDENTIALS')
+SEARCH_KEY = os.environ.get('GOOGLE_SEARCH_KEY')
+SEARCH_CX = os.environ.get('GOOGLE_SEARCH_CX')
 
-# --- 1. CONFIGURANDO O GEMINI COM "OLHOS" (GOOGLE SEARCH) ---
+# Configuração Gemini
 genai.configure(api_key=KEY)
+MODELO = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
 
-# Aqui está o segredo: tools='google_search_retrieval'
-# Usamos o modelo 002 que é mais obediente para ferramentas
-MODELO = genai.GenerativeModel(
-    'models/gemini-1.5-flash-002', 
-    tools='google_search_retrieval'
-)
-
-# --- 2. LEITURA DA PLANILHA ---
+# --- 1. LEITURA DA PLANILHA ---
 def obter_lista_emails():
-    lista_final = []
+    lista = [EMAIL]
     if SHEETS_JSON:
         try:
             credenciais = json.loads(SHEETS_JSON)
@@ -34,98 +30,134 @@ def obter_lista_emails():
             except:
                 sh = gc.open("Formulário sem título (respostas)")
             valores = sh.sheet1.col_values(3)
-            for email in valores:
-                if '@' in email and '.' in email:
-                    lista_final.append(email.strip())
-            print(f">>> Destinatários: {len(lista_final)}")
+            validos = [e.strip() for e in valores if '@' in e and '.' in e]
+            if validos: lista = validos
+            print(f">>> Destinatários carregados: {len(lista)}")
         except Exception as e:
             print(f"⚠️ Erro Planilha: {e}")
-    if not lista_final: lista_final = [EMAIL]
-    return lista_final
+    return lista
 
 DESTINOS = obter_lista_emails()
 
-# --- 3. DESIGN HCPA ---
-ESTILO = """
-  body { font-family: 'Segoe UI', Helvetica, Arial, sans-serif; background: #fff; padding: 30px; color: #404040; line-height: 1.6; }
-  .box { max-width: 700px; margin: 0 auto; border-top: 6px solid #009586; }
-  .header { padding: 30px 0; text-align: center; border-bottom: 1px solid #eee; }
-  .header h3 { margin: 0; font-size: 22px; color: #009586; font-weight: 300; letter-spacing: 0.5px; text-transform: uppercase; }
-  .section { padding: 30px 0; border-bottom: 1px solid #f0f0f0; }
-  .ai { font-size: 14px; color: #555; background: #f8fcfb; padding: 15px; border-left: 3px solid #009586; margin-top: 5px; }
-  .footer { padding: 40px 0; text-align: center; font-size: 12px; color: #999; border-top: 1px solid #eee; }
-  a { color: #009586; font-weight: bold; text-decoration: none; }
-"""
-
-# --- 4. A INTELIGÊNCIA PURA (SEM DUCKDUCKGO) ---
-def gerar_relatorio_gemini():
-    print(">>> Solicitando pesquisa direta ao Google via Gemini...")
-    
-    # Este é o prompt que imita o que você fez no chat
-    prompt = """
-    Atue como um Especialista em Fomento à Pesquisa do HCPA (Hospital de Clínicas de Porto Alegre).
-    
-    Sua tarefa: Pesquise agora no Google Search por editais, chamadas públicas, bolsas e grants ABERTOS e VIGENTES para 2025 e 2026 nas seguintes áreas:
-    1. Física Médica e Radioterapia
-    2. Medicina Nuclear
-    3. Inteligência Artificial aplicada à Saúde
-    4. Inovação Hospitalar (CNPq, FAPERGS, MS, Proadi-SUS)
-    
-    REGRAS DE RESPOSTA (IMPORTANTE):
-    - Você DEVE fornecer o LINK direto para cada edital encontrado.
-    - Crie um resumo HTML formatado.
-    - Use a estrutura: <li><a href="LINK">TITULO</a><br>Resumo: ...</li>
-    - Separe em duas seções: <h3>Oportunidades Nacionais</h3> e <h3>Oportunidades Internacionais</h3>.
-    - Se não encontrar links diretos, avise.
-    """
-    
+# --- 2. GOOGLE SEARCH API ---
+def google_search_api(query):
+    print(f"... Buscando: {query}")
+    url = "https://www.googleapis.com/customsearch/v1"
+    # Como já filtramos os sites no Painel do Google, aqui a busca é ampla
+    params = {
+        'key': SEARCH_KEY,
+        'cx': SEARCH_CX,
+        'q': query,
+        'num': 10,       # Pega 10 resultados por tema
+        'gl': 'br',     
+        'hl': 'pt',     
+        'dateRestrict': 'm3' # Apenas últimos 3 meses (Super atualizado)
+    }
     try:
-        # Aumentamos a criatividade (temperature) para ele explorar mais
-        resposta = MODELO.generate_content(prompt)
+        resp = requests.get(url, params=params)
+        if resp.status_code == 403:
+            print("❌ Erro 403: Verifique se a Custom Search API está ATIVADA no Cloud Console.")
+            return []
         
-        # O Gemini com Search retorna o texto com links embutidos ou no metadata.
-        # Vamos pegar o texto renderizado que ele gera.
-        conteudo = resposta.text
-        
-        # Pequeno ajuste para garantir que virou HTML (caso ele mande Markdown)
-        conteudo = conteudo.replace("```html", "").replace("```", "")
-        
-        return conteudo
+        dados = resp.json()
+        items = dados.get('items', [])
+        resultados = []
+        for item in items:
+            resultados.append(f"Titulo: {item.get('title')} | Link: {item.get('link')} | Resumo: {item.get('snippet')}")
+        return resultados
     except Exception as e:
-        print(f"Erro na geração Gemini: {e}")
-        return "<p>Erro ao conectar com a Inteligência Google.</p>"
+        print(f"❌ Erro API: {e}")
+        return []
 
-# --- 5. EXECUÇÃO ---
-if __name__ == "__main__":
-    html_conteudo = gerar_relatorio_gemini()
+# --- 3. ESTRATÉGIA DE BUSCA (SEM 'site:') ---
+# O robô agora confia na lista que você configurou no painel
+BUSCAS = [
+    '"Chamada Pública" "Física Médica" 2025',
+    '"Edital" "Radioterapia" "Bolsa" 2025',
+    '"Seleção" "Medicina Nuclear" projeto pesquisa',
+    '"Grant" "Medical Physics" 2025',
+    '"Call for proposals" "Artificial Intelligence" Health',
+    '"Edital" "Inovação" Hospitalar 2025'
+]
+
+def coletar_dados():
+    todos = []
+    for query in BUSCAS:
+        res = google_search_api(query)
+        todos.extend(res)
+        time.sleep(1)
+    return todos
+
+def filtro_ia(lista_bruta):
+    if not lista_bruta: return ""
+    lista_unica = list(set(lista_bruta))
+    texto_entrada = "\n".join(lista_unica[:150]) # Analisa até 150 links
     
-    # Montagem Final
+    prompt = f"""
+    Você é o Sentinela do HCPA.
+    Analise estes resultados da Busca Google (já filtrados por sites oficiais).
+    
+    MISSÃO:
+    Encontre APENAS oportunidades de FOMENTO, BOLSAS ou EDITAIS ABERTOS (2025/2026).
+    Áreas: Física Médica, Radioterapia, Med Nuclear, IA em Saúde.
+    
+    REGRAS:
+    1. Ignore notícias, artigos publicados ou eventos passados.
+    2. Retorne JSON: [{{ "titulo": "...", "link": "...", "resumo": "..." }}]
+    
+    DADOS:
+    {texto_entrada}
+    """
+    try:
+        resposta = MODELO.generate_content(prompt)
+        dados = json.loads(resposta.text)
+        html = ""
+        for item in dados:
+            html += f"""
+            <li style='margin-bottom:15px; border-bottom:1px solid #eee; padding-bottom:10px;'>
+                <a href='{item.get('link')}' style='color:#009586;font-weight:bold;text-decoration:none;font-size:16px;'>
+                    {item.get('titulo')} 
+                    <span style='font-size:10px;background:#009586;color:white;padding:2px 5px;border-radius:3px;'>VERIFICADO</span>
+                </a>
+                <div style='font-size:13px;color:#555;margin-top:5px;'>{item.get('resumo')}</div>
+            </li>"""
+        return html
+    except: return ""
+
+# --- 4. EXECUÇÃO ---
+if __name__ == "__main__":
+    raw_data = coletar_dados()
+    print(f">>> {len(raw_data)} resultados oficiais encontrados.")
+    
+    html_conteudo = filtro_ia(raw_data)
+    
+    if not html_conteudo:
+        html_conteudo = "<p style='text-align:center;color:#999;padding:40px;'>Nenhuma oportunidade nova encontrada hoje.</p>"
+
     html_final = f"""
-    <html><head><style>{ESTILO}</style></head>
-    <body>
-        <div class='box'>
-            <div class='header'>
-                <h3>SISTEMA SENTINELA (GOOGLE NATIVE)</h3>
-                <p>Relatório de Inteligência</p>
+    <html><body style='font-family:Segoe UI, sans-serif; background:#fff; padding:20px;'>
+        <div style='max-width:700px; margin:0 auto; border-top:6px solid #009586;'>
+            <div style='text-align:center; padding:20px; border-bottom:1px solid #eee;'>
+                <h3 style='color:#009586; margin:0;'>SENTINELA HCPA</h3>
+                <p style='color:#777; font-size:12px;'>Monitoramento Oficial Governamental</p>
             </div>
-            <div class='section'>
-                {html_conteudo}
-            </div>
-            <div class='footer'>
-                Hospital de Clínicas de Porto Alegre<br>
-                Powered by Gemini Grounding
+            <ul style='list-style:none; padding:20px 0;'>{html_conteudo}</ul>
+            <div style='text-align:center; font-size:11px; color:#aaa; border-top:1px solid #eee; padding:20px;'>
+                Hospital de Clínicas de Porto Alegre
             </div>
         </div>
     </body></html>
     """
     
-    print(f">>> Enviando para {len(DESTINOS)} destinatários via Bcc.")
+    print(f">>> Enviando para {len(DESTINOS)} pessoas.")
     msg = EmailMessage()
-    msg['Subject'], msg['From'], msg['To'] = 'Sistema Sentinela: Relatório Diário', EMAIL, EMAIL
+    msg['Subject'] = 'Sentinela: Relatório Oficial (Google Gov)'
+    msg['From'] = EMAIL
+    msg['To'] = EMAIL
     msg['Bcc'] = ', '.join(DESTINOS)
     msg.add_alternative(html_final, subtype='html')
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(EMAIL, SENHA)
         smtp.send_message(msg)
-    print("✅ E-mail enviado!") 
+    print("✅ Sucesso!")
