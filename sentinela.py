@@ -36,8 +36,8 @@ def obter_lista_emails():
     if not lista_final: lista_final = [EMAIL]
     return lista_final
 
-#DESTINOS = obter_lista_emails()
-DESTINOS = EMAIL
+DESTINOS = obter_lista_emails()
+#DESTINOS = EMAIL
 # --- 3. DESIGN HCPA (Identidade Visual) ---
 ESTILO = """
   body { font-family: 'Segoe UI', Helvetica, Arial, sans-serif; background: #fff; padding: 30px; color: #404040; line-height: 1.6; }
