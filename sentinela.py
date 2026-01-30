@@ -11,7 +11,8 @@ KEY = os.environ.get('GEMINI_API_KEY')
 SHEETS_JSON = os.environ.get('GOOGLE_CREDENTIALS')
 
 genai.configure(api_key=KEY)
-MODELO = genai.GenerativeModel('gemini-1.5-flash')
+# Forçamos o Gemini a responder SEMPRE em JSON para não quebrar o código
+MODELO = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
 
 # --- 2. FUNÇÃO DE LISTA DE E-MAILS ---
 def obter_lista_emails():
@@ -29,16 +30,16 @@ def obter_lista_emails():
             for email in valores:
                 if '@' in email and '.' in email:
                     lista_final.append(email.strip())
-            print(f">>> Planilha carregada: {len(lista_final)} destinatários.")
+            print(f">>> Lista carregada: {len(lista_final)} destinatários.")
         except Exception as e:
-            print(f"⚠️ Erro Planilha: {e}. Usando modo segurança.")
+            print(f"⚠️ Erro Planilha: {e}. Usando modo de segurança.")
     
     if not lista_final: lista_final = [EMAIL]
     return lista_final
 
 DESTINOS = obter_lista_emails()
-#DESTINOS = EMAIL
-# --- 3. DESIGN HCPA (Identidade Visual) ---
+
+# --- 3. DESIGN HCPA ---
 ESTILO = """
   body { font-family: 'Segoe UI', Helvetica, Arial, sans-serif; background: #fff; padding: 30px; color: #404040; line-height: 1.6; }
   .box { max-width: 700px; margin: 0 auto; border-top: 6px solid #009586; }
@@ -61,93 +62,66 @@ TEMAS = [
     "CNPq", "FAPERGS", "Ministério da Saúde", "Proadi-SUS"
 ]
 
-# --- 4. INTELIGÊNCIA INDIVIDUAL (PENTE FINO) ---
-def consultar_ia(titulo, resumo):
-    """Analisa UM item por vez. Se for bom, resume. Se for lixo, descarta."""
-    try: 
-        prompt = f"""
-        Analise este resultado de busca:
-        Título: {titulo}
-        Resumo: {resumo}
-        
-        PERGUNTA: Isto é uma oportunidade de financiamento, bolsa, edital ou chamada de pesquisa na área da saúde/tecnologia vigente (2025 ou 2026)?
-        
-        REGRAS:
-        - Responda "NÃO" para: notícias, artigos científicos já publicados, cursos pagos, ou coisas antigas.
-        - Se for RELEVANTE, escreva um resumo de 1 frase explicando o que é.
-        """
-        res = MODELO.generate_content(prompt).text.strip()
-        # Se a IA disser NÃO, retornamos vazio (o item será ignorado)
-        return None if "NÃO" in res.upper() or len(res) < 5 else res
-    except: return None
-
-def buscar(sufixo_query):
-    html = ""
+# --- 4. INTELIGÊNCIA EM LOTE (EDITOR CHEFE - SEM LIMITES) ---
+def coletar_bruto(sufixo):
+    """Coleta tudo o que encontrar no DuckDuckGo."""
+    resultados = []
     with DDGS(timeout=30) as ddgs:
         for tema in TEMAS:
             try:
-                # Pausa para não bloquear a API do Google (importante no método pente fino)
-                time.sleep(2) 
-                
-                # Aumentei para 4 resultados POR TEMA. 
-                # Se temos 12 temas x 4 resultados = 48 itens verificados toda manhã.
-                for r in list(ddgs.text(f'"{tema}" {sufixo_query}', max_results=4)):
-                    
-                    analise = consultar_ia(r.get('title',''), r.get('body',''))
-                    
-                    if analise: # Só entra na lista se a IA aprovou
-                        link = r.get('href','#')
-                        pdf = " <span class='pdf-tag'>PDF</span>" if link.endswith('.pdf') else ""
-                        html += f"""
-                        <li>
-                            <a href='{link}'>{r.get('title')} {pdf}</a>
-                            <div class='ai'><span class='label-ai'>Análise Sentinela</span> {analise}</div>
-                        </li>"""
+                # Coleta 4 resultados por tema (aprox 48 links no total)
+                for r in list(ddgs.text(f'"{tema}" {sufixo}', max_results=4)):
+                    resultados.append(f"Titulo: {r.get('title')} | Link: {r.get('href')} | Resumo: {r.get('body')}")
             except: continue
-    return html
+    return resultados
+
+def curadoria_ia(lista_bruta):
+    """Envia a lista para o Gemini filtrar e devolver TUDO o que for bom."""
+    if not lista_bruta: return ""
+    
+    # Limitamos a entrada para evitar erro de tamanho, mas 80 itens é bastante coisa
+    texto_entrada = "\n".join(lista_bruta[:80])
+    
+    prompt = f"""
+    Você é um Editor Sênior do Hospital de Clínicas de Porto Alegre (HCPA).
+    Abaixo está uma lista bruta de resultados de busca da web.
+    
+    SUA MISSÃO:
+    Filtrar e selecionar TODAS as oportunidades que sejam RELEVANTES para financiamento, bolsas, editais ou chamadas de pesquisa na área da saúde/tecnologia vigentes (2025/2026).
+    
+    REGRAS CRÍTICAS:
+    1. NÃO limite a quantidade. Se houver 10 relevantes, liste as 10. Se houver 20, liste as 20.
+    2. Jogue fora: notícias genéricas, cursos pagos, vendas de produtos ou artigos científicos antigos.
+    3. Retorne APENAS um JSON com esta estrutura para cada item aprovado:
+       [{{ "titulo": "...", "link": "...", "resumo_ia": "Resumo explicativo em 1 frase." }}]
+    
+    LISTA BRUTA:
+    {texto_entrada}
+    """
+    
+    try:
+        resposta = MODELO.generate_content(prompt)
+        dados = json.loads(resposta.text)
+        
+        html_gerado = ""
+        for item in dados:
+            link = item.get('link','#')
+            pdf = " <span class='pdf-tag'>PDF</span>" if link.endswith('.pdf') else ""
+            html_gerado += f"""
+            <li>
+                <a href='{link}'>{item.get('titulo')} {pdf}</a>
+                <div class='ai'><span class='label-ai'>Análise Sentinela</span> {item.get('resumo_ia')}</div>
+            </li>
+            """
+        return html_gerado
+    except Exception as e:
+        print(f"Erro na curadoria IA: {e}")
+        return ""
 
 # --- 5. EXECUÇÃO ---
 if __name__ == "__main__":
-    print(">>> Iniciando Varredura Detalhada (Pente Fino)...")
+    print(">>> 1. Coletando dados brutos (Brasil)...")
+    raw_br = coletar_bruto('(edital OR chamada OR seleção OR bolsa) 2025..2026 site:.br')
     
-    # Buscas (Brasil e Mundo)
-    br = buscar('(edital OR chamada OR seleção OR bolsa) 2025..2026 site:.br')
-    world = buscar('(grant OR funding OR phd position) 2025..2026 -site:.br')
-
-    corpo = ""
-    if br: corpo += f"<div class='section'><div class='section-title'>Oportunidades Nacionais</div><ul>{br}</ul></div>"
-    if world: corpo += f"<div class='section'><div class='section-title'>Oportunidades Internacionais</div><ul>{world}</ul></div>"
-    
-    if not corpo:
-        corpo = "<p style='text-align:center; padding:40px; color:#999; font-size:14px;'>Nenhuma oportunidade relevante encontrada hoje.</p>"
-
-    html_final = f"""
-    <html><head><style>{ESTILO}</style></head>
-    <body>
-        <div class='box'>
-            <div class='header'>
-                <h3>SISTEMA DE MONITORAMENTO SENTINELA</h3>
-                <p>Relatório Diário de Inteligência</p>
-            </div>
-            {corpo}
-            <div class='footer'>
-                Hospital de Clínicas de Porto Alegre<br>
-                Monitoramento Automatizado
-            </div>
-        </div>
-    </body></html>
-    """
-    
-    print(f">>> Enviando para {len(DESTINOS)} destinatários via Bcc.")
-    
-    msg = EmailMessage()
-    msg['Subject'] = 'Sistema Sentinela: Relatório Diário'
-    msg['From'] = EMAIL
-    msg['To'] = EMAIL 
-    msg['Bcc'] = ', '.join(DESTINOS)
-    msg.add_alternative(html_final, subtype='html')
-
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(EMAIL, SENHA)
-        smtp.send_message(msg)
-    print("✅ E-mail enviado!")
+    print(">>> 2. Coletando dados brutos (Mundo)...")
+    raw_world = coletar_
