@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Baixar código do repositório
+      - name: Baixar código
         uses: actions/checkout@v3
 
       - name: Configurar Python
@@ -27,6 +27,7 @@ jobs:
           EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
           SENHA_APP: ${{ secrets.SENHA_APP }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          EMAIL_DESTINO: ${{ secrets.EMAIL_DESTINO }}
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }} # <--- ESSA É A LINHA QUE FALTAVA!
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          GOOGLE_SEARCH_KEY: ${{ secrets.GOOGLE_SEARCH_KEY }} # <--- NOVO
+          GOOGLE_SEARCH_CX: ${{ secrets.GOOGLE_SEARCH_CX }}   # <--- NOVO
         run: python sentinela.py
