@@ -4,8 +4,10 @@ import gspread
 from email.message import EmailMessage
 from duckduckgo_search import DDGS
 
-# Ignorar avisos de atualização de bibliotecas para limpar o log
+# --- 0. LIMPEZA DE LOGS ---
+# Ignora avisos de depreciação para não poluir o terminal
 warnings.filterwarnings("ignore")
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
 
 # --- 1. CONFIGURAÇÕES ---
 EMAIL = os.environ.get('EMAIL_REMETENTE')
@@ -14,7 +16,7 @@ KEY = os.environ.get('GEMINI_API_KEY')
 SHEETS_JSON = os.environ.get('GOOGLE_CREDENTIALS')
 
 genai.configure(api_key=KEY)
-# Configuração para resposta JSON
+# Forçamos o Gemini a responder SEMPRE em JSON
 MODELO = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
 
 # --- 2. FUNÇÃO DE LISTA DE E-MAILS ---
@@ -29,6 +31,7 @@ def obter_lista_emails():
             except:
                 sh = gc.open("Formulário sem título (respostas)")
             
+            # Lê a Coluna C (índice 3)
             valores = sh.sheet1.col_values(3)
             for email in valores:
                 if '@' in email and '.' in email:
@@ -126,17 +129,44 @@ if __name__ == "__main__":
     raw_br = coletar_bruto('(edital OR chamada OR seleção OR bolsa) 2025..2026 site:.br')
     
     print(">>> 2. Coletando dados brutos (Mundo)...")
-    # AQUI ESTAVA O ERRO, AGORA ESTÁ CORRIGIDO:
     raw_world = coletar_bruto('(grant OR funding OR phd position) 2025..2026 -site:.br')
 
     print(">>> 3. IA Sentinela analisando e filtrando...")
     html_br = curadoria_ia(raw_br)
     html_world = curadoria_ia(raw_world)
 
+    # Monta o corpo do e-mail
     corpo = ""
     if html_br: corpo += f"<div class='section'><div class='section-title'>Oportunidades Nacionais</div><ul>{html_br}</ul></div>"
     if html_world: corpo += f"<div class='section'><div class='section-title'>Oportunidades Internacionais</div><ul>{html_world}</ul></div>"
     
     if not corpo: corpo = "<p style='text-align:center; padding:40px; color:#999;'>Nenhuma oportunidade relevante encontrada hoje.</p>"
 
-    html_final
+    # --- AQUI ESTAVA O ERRO: A variável html_final agora é criada explicitamente ---
+    html_final = f"""
+    <html><head><style>{ESTILO}</style></head>
+    <body>
+        <div class='box'>
+            <div class='header'>
+                <h3>SISTEMA DE MONITORAMENTO SENTINELA</h3>
+                <p>Relatório de Inteligência</p>
+            </div>
+            {corpo}
+            <div class='footer'>
+                Hospital de Clínicas de Porto Alegre<br>
+                Curadoria via IA Generativa
+            </div>
+        </div>
+    </body></html>
+    """
+    
+    print(f">>> Enviando para {len(DESTINOS)} destinatários via Bcc.")
+    msg = EmailMessage()
+    msg['Subject'], msg['From'], msg['To'] = 'Sistema Sentinela: Relatório Diário', EMAIL, EMAIL
+    msg['Bcc'] = ', '.join(DESTINOS)
+    msg.add_alternative(html_final, subtype='html')
+
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        smtp.login(EMAIL, SENHA)
+        smtp.send_message(msg)
+    print("✅ Processo concluído!")
