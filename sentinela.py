@@ -2,24 +2,27 @@ import os, time, smtplib, json, warnings
 import google.generativeai as genai
 import gspread
 from email.message import EmailMessage
-from duckduckgo_search import DDGS
 
-# --- 0. LIMPEZA DE LOGS ---
-# Ignora avisos de depreciação para não poluir o terminal
+# --- 0. CONFIGURAÇÕES INICIAIS ---
 warnings.filterwarnings("ignore")
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
 
-# --- 1. CONFIGURAÇÕES ---
 EMAIL = os.environ.get('EMAIL_REMETENTE')
 SENHA = os.environ.get('SENHA_APP')
 KEY = os.environ.get('GEMINI_API_KEY')
 SHEETS_JSON = os.environ.get('GOOGLE_CREDENTIALS')
 
+# --- 1. CONFIGURANDO O GEMINI COM "OLHOS" (GOOGLE SEARCH) ---
 genai.configure(api_key=KEY)
-# Forçamos o Gemini a responder SEMPRE em JSON
-MODELO = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
 
-# --- 2. FUNÇÃO DE LISTA DE E-MAILS ---
+# Aqui está o segredo: tools='google_search_retrieval'
+# Usamos o modelo 002 que é mais obediente para ferramentas
+MODELO = genai.GenerativeModel(
+    'models/gemini-1.5-flash-002', 
+    tools='google_search_retrieval'
+)
+
+# --- 2. LEITURA DA PLANILHA ---
 def obter_lista_emails():
     lista_final = []
     if SHEETS_JSON:
@@ -30,16 +33,13 @@ def obter_lista_emails():
                 sh = gc.open("Sentinela Emails")
             except:
                 sh = gc.open("Formulário sem título (respostas)")
-            
-            # Lê a Coluna C (índice 3)
             valores = sh.sheet1.col_values(3)
             for email in valores:
                 if '@' in email and '.' in email:
                     lista_final.append(email.strip())
-            print(f">>> Lista carregada: {len(lista_final)} destinatários.")
+            print(f">>> Destinatários: {len(lista_final)}")
         except Exception as e:
-            print(f"⚠️ Erro Planilha: {e}. Usando modo de segurança.")
-    
+            print(f"⚠️ Erro Planilha: {e}")
     if not lista_final: lista_final = [EMAIL]
     return lista_final
 
@@ -52,109 +52,68 @@ ESTILO = """
   .header { padding: 30px 0; text-align: center; border-bottom: 1px solid #eee; }
   .header h3 { margin: 0; font-size: 22px; color: #009586; font-weight: 300; letter-spacing: 0.5px; text-transform: uppercase; }
   .section { padding: 30px 0; border-bottom: 1px solid #f0f0f0; }
-  .section-title { font-size: 12px; font-weight: 700; color: #666; text-transform: uppercase; border-bottom: 2px solid #009586; padding-bottom: 5px; }
-  ul { padding: 0; list-style: none; }
-  li { margin-bottom: 25px; }
-  a { color: #009586; text-decoration: none; font-weight: 600; font-size: 18px; display: block; }
   .ai { font-size: 14px; color: #555; background: #f8fcfb; padding: 15px; border-left: 3px solid #009586; margin-top: 5px; }
-  .label-ai { font-weight: bold; color: #009586; font-size: 10px; text-transform: uppercase; }
-  .pdf-tag { font-size: 10px; color: white; background: #009586; padding: 2px 6px; border-radius: 3px; vertical-align: middle; }
   .footer { padding: 40px 0; text-align: center; font-size: 12px; color: #999; border-top: 1px solid #eee; }
+  a { color: #009586; font-weight: bold; text-decoration: none; }
 """
 
-TEMAS = [
-    "Radioterapia", "Radiofármacos", "Medicina Nuclear", "Física Médica", "Dosimetria", 
-    "Proteção Radiológica", "Inteligência Artificial saúde", "Inovação Hospitalar", 
-    "CNPq", "FAPERGS", "Ministério da Saúde", "Proadi-SUS"
-]
-
-# --- 4. INTELIGÊNCIA EM LOTE ---
-def coletar_bruto(sufixo):
-    """Coleta tudo o que encontrar no DuckDuckGo."""
-    resultados = []
-    with DDGS(timeout=30) as ddgs:
-        for tema in TEMAS:
-            try:
-                # Coleta 4 resultados por tema
-                for r in list(ddgs.text(f'"{tema}" {sufixo}', max_results=4)):
-                    resultados.append(f"Titulo: {r.get('title')} | Link: {r.get('href')} | Resumo: {r.get('body')}")
-            except: continue
-    return resultados
-
-def curadoria_ia(lista_bruta):
-    """Envia a lista para o Gemini filtrar e devolver TUDO o que for bom."""
-    if not lista_bruta: return ""
+# --- 4. A INTELIGÊNCIA PURA (SEM DUCKDUCKGO) ---
+def gerar_relatorio_gemini():
+    print(">>> Solicitando pesquisa direta ao Google via Gemini...")
     
-    texto_entrada = "\n".join(lista_bruta[:80])
+    # Este é o prompt que imita o que você fez no chat
+    prompt = """
+    Atue como um Especialista em Fomento à Pesquisa do HCPA (Hospital de Clínicas de Porto Alegre).
     
-    prompt = f"""
-    Você é um Editor Sênior do Hospital de Clínicas de Porto Alegre (HCPA).
-    Abaixo está uma lista bruta de resultados de busca da web.
+    Sua tarefa: Pesquise agora no Google Search por editais, chamadas públicas, bolsas e grants ABERTOS e VIGENTES para 2025 e 2026 nas seguintes áreas:
+    1. Física Médica e Radioterapia
+    2. Medicina Nuclear
+    3. Inteligência Artificial aplicada à Saúde
+    4. Inovação Hospitalar (CNPq, FAPERGS, MS, Proadi-SUS)
     
-    SUA MISSÃO:
-    Filtrar e selecionar TODAS as oportunidades que sejam RELEVANTES para financiamento, bolsas, editais ou chamadas de pesquisa na área da saúde/tecnologia vigentes (2025/2026).
-    
-    REGRAS CRÍTICAS:
-    1. NÃO limite a quantidade. Se houver 10 relevantes, liste as 10. Se houver 20, liste as 20.
-    2. Jogue fora: notícias genéricas, cursos pagos, vendas de produtos ou artigos científicos antigos.
-    3. Retorne APENAS um JSON com esta estrutura para cada item aprovado:
-       [{{ "titulo": "...", "link": "...", "resumo_ia": "Resumo explicativo em 1 frase." }}]
-    
-    LISTA BRUTA:
-    {texto_entrada}
+    REGRAS DE RESPOSTA (IMPORTANTE):
+    - Você DEVE fornecer o LINK direto para cada edital encontrado.
+    - Crie um resumo HTML formatado.
+    - Use a estrutura: <li><a href="LINK">TITULO</a><br>Resumo: ...</li>
+    - Separe em duas seções: <h3>Oportunidades Nacionais</h3> e <h3>Oportunidades Internacionais</h3>.
+    - Se não encontrar links diretos, avise.
     """
     
     try:
+        # Aumentamos a criatividade (temperature) para ele explorar mais
         resposta = MODELO.generate_content(prompt)
-        dados = json.loads(resposta.text)
         
-        html_gerado = ""
-        for item in dados:
-            link = item.get('link','#')
-            pdf = " <span class='pdf-tag'>PDF</span>" if link.endswith('.pdf') else ""
-            html_gerado += f"""
-            <li>
-                <a href='{link}'>{item.get('titulo')} {pdf}</a>
-                <div class='ai'><span class='label-ai'>Análise Sentinela</span> {item.get('resumo_ia')}</div>
-            </li>
-            """
-        return html_gerado
+        # O Gemini com Search retorna o texto com links embutidos ou no metadata.
+        # Vamos pegar o texto renderizado que ele gera.
+        conteudo = resposta.text
+        
+        # Pequeno ajuste para garantir que virou HTML (caso ele mande Markdown)
+        conteudo = conteudo.replace("```html", "").replace("```", "")
+        
+        return conteudo
     except Exception as e:
-        print(f"Erro na curadoria IA: {e}")
-        return ""
+        print(f"Erro na geração Gemini: {e}")
+        return "<p>Erro ao conectar com a Inteligência Google.</p>"
 
 # --- 5. EXECUÇÃO ---
 if __name__ == "__main__":
-    print(">>> 1. Coletando dados brutos (Brasil)...")
-    raw_br = coletar_bruto('(edital OR chamada OR seleção OR bolsa) 2025..2026 site:.br')
+    html_conteudo = gerar_relatorio_gemini()
     
-    print(">>> 2. Coletando dados brutos (Mundo)...")
-    raw_world = coletar_bruto('(grant OR funding OR phd position) 2025..2026 -site:.br')
-
-    print(">>> 3. IA Sentinela analisando e filtrando...")
-    html_br = curadoria_ia(raw_br)
-    html_world = curadoria_ia(raw_world)
-
-    # Monta o corpo do e-mail
-    corpo = ""
-    if html_br: corpo += f"<div class='section'><div class='section-title'>Oportunidades Nacionais</div><ul>{html_br}</ul></div>"
-    if html_world: corpo += f"<div class='section'><div class='section-title'>Oportunidades Internacionais</div><ul>{html_world}</ul></div>"
-    
-    if not corpo: corpo = "<p style='text-align:center; padding:40px; color:#999;'>Nenhuma oportunidade relevante encontrada hoje.</p>"
-
-    # --- AQUI ESTAVA O ERRO: A variável html_final agora é criada explicitamente ---
+    # Montagem Final
     html_final = f"""
     <html><head><style>{ESTILO}</style></head>
     <body>
         <div class='box'>
             <div class='header'>
-                <h3>SISTEMA DE MONITORAMENTO SENTINELA</h3>
+                <h3>SISTEMA SENTINELA (GOOGLE NATIVE)</h3>
                 <p>Relatório de Inteligência</p>
             </div>
-            {corpo}
+            <div class='section'>
+                {html_conteudo}
+            </div>
             <div class='footer'>
                 Hospital de Clínicas de Porto Alegre<br>
-                Curadoria via IA Generativa
+                Powered by Gemini Grounding
             </div>
         </div>
     </body></html>
@@ -169,4 +128,4 @@ if __name__ == "__main__":
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(EMAIL, SENHA)
         smtp.send_message(msg)
-    print("✅ Processo concluído!")
+    print("✅ E-mail enviado!") 
