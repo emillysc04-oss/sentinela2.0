@@ -1,10 +1,13 @@
-import os, smtplib, json, time, cloudscraper
+import os, smtplib, json, time, requests, urllib3
 import google.generativeai as genai
 import gspread
 from email.message import EmailMessage
 from bs4 import BeautifulSoup
 
 # --- CONFIGURAÇÕES ---
+# Ignora o erro de certificado SSL (necessário para FAPERGS/CNPq)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 EMAIL = os.environ.get('EMAIL_REMETENTE')
 SENHA = os.environ.get('SENHA_APP')
 KEY = os.environ.get('GEMINI_API_KEY')
@@ -31,50 +34,64 @@ def obter_destinatarios():
 
 DESTINOS = obter_destinatarios()
 
-# --- 2. FONTES (URLs Ajustadas) ---
+# --- 2. FONTES (LINKS CORRIGIDOS/TESTADOS) ---
 FONTES = [
-    {"nome": "FAPERGS", "url": "https://fapergs.rs.gov.br/editais-abertos"},
-    {"nome": "CNPq", "url": "https://www.gov.br/cnpq/pt-br/composicao/diretorias/dco/chamadas-publicas/chamadas-publicas-abertas"},
-    {"nome": "FINEP", "url": "http://www.finep.gov.br/chamadas-publicas/chamadas-publicas-abertas"},
-    {"nome": "Proadi-SUS", "url": "https://hospitais.proadi-sus.org.br/projetos"}
+    {
+        "nome": "FAPERGS", 
+        "url": "https://fapergs.rs.gov.br/editais-abertos"
+    },
+    {
+        "nome": "CNPq (Memória)", 
+        "url": "http://memoria2.cnpq.br/web/guest/chamadas-publicas"
+    },
+    {
+        "nome": "FINEP (Abertas)", 
+        "url": "http://www.finep.gov.br/chamadas-publicas/chamadaspublicas?situacao=aberta"
+    },
+    {
+        "nome": "Proadi-SUS (Editais)", 
+        "url": "https://hospitais.proadi-sus.org.br/editais"
+    }
 ]
 
 def ler_pagina(url):
-    """Usa cloudscraper para furar o bloqueio anti-robô"""
-    # Cria um navegador falso (Chrome)
-    scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True})
+    """Lê a página ignorando SSL e fingindo ser um navegador comum"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Upgrade-Insecure-Requests': '1'
+    }
     
     try:
-        response = scraper.get(url, timeout=30)
+        # Timeout curto e verify=False para não travar
+        response = requests.get(url, headers=headers, timeout=20, verify=False)
         response.encoding = 'utf-8'
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            # Limpeza
-            for tag in soup(["script", "style", "nav", "footer", "iframe", "svg"]): 
+            # Remove menus para a IA focar no conteúdo principal
+            for tag in soup(["script", "style", "nav", "footer", "iframe", "header"]): 
                 tag.decompose()
             text = soup.get_text(separator=' ', strip=True)
-            return text[:40000] # Lê bastante texto
+            return text[:40000] 
         else:
             print(f"   -> Erro HTTP: {response.status_code}")
     except Exception as e:
-        print(f"   -> Erro Conexão: {str(e)[:100]}")
+        print(f"   -> Erro Conexão: {str(e)[:50]}...")
     return ""
 
 def analisar_com_gemini(texto_site, nome_fonte):
-    if not texto_site or len(texto_site) < 500: return []
+    if not texto_site or len(texto_site) < 200: return []
     
-    # Prompt focado em encontrar DATAS FUTURAS ou "FLUXO CONTÍNUO"
     prompt = f"""
     Analise o texto extraído do site {nome_fonte}.
     
     MISSÃO:
-    Encontre QUALQUER edital, chamada ou seleção que esteja com INSCRIÇÕES ABERTAS ou VIGENTE em 2025/2026.
-    
-    DICA: Procure por datas futuras (Ex: "até ... de 2025", "até ... de 2026") ou termos como "Fluxo Contínuo".
+    Liste TODAS as oportunidades (Editais, Chamadas, Bolsas) que estão ABERTAS ou VIGENTES.
+    Procure por datas de 2025/2026 ou "Fluxo Contínuo".
     
     SAÍDA JSON:
-    [ {{ "titulo": "Nome do Edital", "resumo": "Do que se trata", "status": "Prazo final ou Situação" }} ]
+    [ {{ "titulo": "...", "resumo": "...", "status": "..." }} ]
     
     TEXTO:
     {texto_site}
@@ -88,14 +105,14 @@ def analisar_com_gemini(texto_site, nome_fonte):
 if __name__ == "__main__":
     relatorio_html = ""
     total = 0
-    print(">>> Iniciando Varredura Blindada (CloudScraper)...")
+    print(">>> Iniciando Sentinela 55.0 (Links Corrigidos)...")
     
     for fonte in FONTES:
         print(f"... Acessando: {fonte['nome']}")
         conteudo = ler_pagina(fonte['url'])
         
         if conteudo:
-            print(f"   -> Sucesso! {len(conteudo)} caracteres lidos. IA Analisando...")
+            print(f"   -> Sucesso! Texto extraído. IA Analisando...")
             oportunidades = analisar_com_gemini(conteudo, fonte['nome'])
             
             if oportunidades:
@@ -113,19 +130,19 @@ if __name__ == "__main__":
                     </li>"""
                 relatorio_html += "</ul></div>"
             else:
-                print("   -> IA não encontrou datas vigentes no texto.")
+                print("   -> IA não encontrou datas vigentes.")
         else:
-            print("   -> Bloqueio persistente ou site vazio.")
-        time.sleep(2)
+            print("   -> Falha na leitura (Site instável).")
+        time.sleep(1)
 
     if not relatorio_html:
-        relatorio_html = "<p style='text-align:center; color:#777;'>Nenhum edital aberto encontrado hoje.</p>"
+        relatorio_html = "<p style='text-align:center; color:#777;'>Nenhum edital novo detectado nas fontes oficiais hoje.</p>"
 
     html_final = f"""
     <html><body style='font-family:Arial, sans-serif; padding:20px;'>
         <div style='max-width:600px; margin:0 auto; border:1px solid #ddd; padding:20px;'>
-            <h2 style='color:#009586; text-align:center;'>SENTINELA BLINDADO</h2>
-            <p style='text-align:center; color:#aaa; font-size:12px;'>Monitoramento Anti-Bloqueio</p>
+            <h2 style='color:#009586; text-align:center;'>SENTINELA OFICIAL</h2>
+            <p style='text-align:center; color:#aaa; font-size:12px;'>Monitoramento Direto</p>
             <hr style='border:0; border-top:1px solid #eee; margin:20px 0;'>
             {relatorio_html}
         </div>
@@ -134,14 +151,13 @@ if __name__ == "__main__":
 
     print(f">>> Enviando para {len(DESTINOS)} pessoas.")
     msg = EmailMessage()
-    msg['Subject'] = f'Sentinela: {total} Oportunidades Detectadas'
+    msg['Subject'] = f'Sentinela: {total} Oportunidades Encontradas'
     msg['From'] = EMAIL
     msg['To'] = EMAIL
     msg['Bcc'] = ', '.join(DESTINOS)
     msg.add_alternative(html_final, subtype='html')
 
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
-        s.login(EMAIL, SENHA)
-        s.send_message(s) # Correção aqui também, estava s.send_message(msg) mas o objeto é msg, corrigido no código acima implicitamente
-        s.send_message(msg) # GARANTINDO O ENVIO CORRETO
-    print("✅ Feito.")
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        smtp.login(EMAIL, SENHA)
+        smtp.send_message(msg) # <--- AGORA ESTÁ CERTO!
+    print("✅ E-mail enviado com sucesso!")
