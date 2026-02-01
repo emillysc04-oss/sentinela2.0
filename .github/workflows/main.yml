@@ -28,6 +28,6 @@ jobs:
           SENHA_APP: ${{ secrets.SENHA_APP }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-          GOOGLE_SEARCH_KEY: ${{ secrets.GOOGLE_SEARCH_KEY }} # <--- NOVO
-          GOOGLE_SEARCH_CX: ${{ secrets.GOOGLE_SEARCH_CX }}   # <--- NOVO
+          GOOGLE_SEARCH_KEY: ${{ secrets.GOOGLE_SEARCH_KEY }} # <--- ESSA LINHA É CRUCIAL
+          GOOGLE_SEARCH_CX: ${{ secrets.GOOGLE_SEARCH_CX }}   # <--- ESSA TAMBÉM
         run: python sentinela.py
