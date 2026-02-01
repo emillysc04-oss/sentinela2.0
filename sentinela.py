@@ -1,8 +1,8 @@
-import os, smtplib, json, time, requests, urllib3
+import os, smtplib, json, time, requests, urllib3, urllib.parse
 import google.generativeai as genai
 import gspread
+import xml.etree.ElementTree as ET
 from email.message import EmailMessage
-from bs4 import BeautifulSoup
 
 # --- CONFIGURAÇÕES ---
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -33,76 +33,80 @@ def obter_destinatarios():
 
 DESTINOS = obter_destinatarios()
 
-# --- 2. FONTES (MODO RSS/NOTÍCIAS) ---
-# Mudamos para páginas de Notícias/RSS que são mais fáceis de ler que os painéis de editais
+# --- 2. FONTES (AGORA USANDO GOOGLE NEWS RSS) ---
+# Em vez de links diretos que quebram, usamos buscas no Google News restritas ao site oficial
 FONTES = [
     {
-        "nome": "CNPq (Notícias)", 
-        "url": "https://www.gov.br/cnpq/pt-br/assuntos/noticias" 
+        "nome": "FAPERGS (Via Google News)",
+        # Busca: site:fapergs.rs.gov.br e (Edital OU Chamada) nos ultimos 90 dias
+        "query": "site:fapergs.rs.gov.br (Edital OR Chamada) when:90d"
     },
     {
-        "nome": "FINEP (Imprensa)", 
-        "url": "http://www.finep.gov.br/noticias"
+        "nome": "CNPq (Via Google News)",
+        "query": "site:gov.br/cnpq (Chamada OR Bolsa OR Edital) when:30d"
     },
     {
-        "nome": "FAPERGS (Feed)", 
-        "url": "https://fapergs.rs.gov.br/noticias" # Tentativa na página de notícias em vez de editais
+        "nome": "FINEP (Via Google News)",
+        "query": "site:finep.gov.br (Chamada OR Seleção) when:60d"
     },
     {
-        "nome": "Proadi-SUS", 
-        "url": "https://hospitais.proadi-sus.org.br/novidades"
+        "nome": "Proadi-SUS (Via Google News)",
+        "query": "site:proadi-sus.org.br (Edital OR Seleção OR Projeto) when:90d"
     }
 ]
 
-def ler_pagina(url):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Referer': 'https://www.google.com/'
+def buscar_rss(query):
+    """Busca no Google News RSS - Imune a bloqueios de IP"""
+    base_url = "https://news.google.com/rss/search"
+    params = {
+        "q": query,
+        "hl": "pt-BR",
+        "gl": "BR",
+        "ceid": "BR:pt-419"
     }
     
     try:
-        # verify=False ajuda a passar por alguns firewalls gov.br
-        response = requests.get(url, headers=headers, timeout=25, verify=False)
-        response.encoding = 'utf-8' # Força UTF-8 para corrigir acentos
+        # User-Agent simples funciona bem com RSS do Google
+        response = requests.get(base_url, params=params, timeout=20)
         
         if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
+            # Parseia o XML do RSS
+            root = ET.fromstring(response.content)
+            texto_agregado = ""
             
-            # --- DEBUG: O QUE O ROBÔ ESTÁ VENDO? ---
-            titulo_site = soup.title.string.strip() if soup.title else "Sem Título"
-            print(f"   -> Site acessado: '{titulo_site}'") 
-            # ---------------------------------------
-
-            # Limpa o HTML
-            for tag in soup(["script", "style", "nav", "footer", "iframe", "header", "svg"]): 
-                tag.decompose()
-            text = soup.get_text(separator=' ', strip=True)
-            return text[:50000] 
+            # Pega as top 10 notícias do feed
+            for item in root.findall('.//item')[:10]:
+                titulo = item.find('title').text if item.find('title') is not None else ""
+                link = item.find('link').text if item.find('link') is not None else ""
+                data = item.find('pubDate').text if item.find('pubDate') is not None else ""
+                
+                texto_agregado += f"TITULO: {titulo}\nLINK: {link}\nDATA: {data}\n---\n"
+            
+            return texto_agregado
         else:
-            print(f"   -> Erro HTTP: {response.status_code}")
+            print(f"   -> Erro RSS Google: {response.status_code}")
     except Exception as e:
-        print(f"   -> Erro Conexão: {str(e)[:100]}")
+        print(f"   -> Erro Conexão RSS: {str(e)[:100]}")
     return ""
 
-def analisar_com_gemini(texto_site, nome_fonte):
-    if not texto_site or len(texto_site) < 500: return []
+def analisar_com_gemini(texto_rss, nome_fonte):
+    if not texto_rss: return []
     
     prompt = f"""
-    Analise o texto desta página de notícias/editais: {nome_fonte}.
+    Analise esta lista de notícias recentes do {nome_fonte}.
     
     MISSÃO:
-    Identifique QUALQUER oportunidade de fomento, chamada pública, edital ou bolsa mencionada.
-    Se encontrar menções a "Aberto", "Lançado", "Inscrições", traga para o relatório.
+    Identifique editais, chamadas ou oportunidades de fomento para pesquisadores da saúde (Física Médica, IA, Radioterapia).
     
-    IMPORTANTE: 
-    Não filtre rigorosamente por data. Se parecer recente (últimos meses), inclua.
+    CRITÉRIOS:
+    - Ignore notícias administrativas (ex: "Diretor viaja", "Reunião").
+    - Fioque em: LANÇAMENTO DE EDITAL, CHAMADA ABERTA, INSCRIÇÕES.
     
     SAÍDA JSON:
-    [ {{ "titulo": "Título da Notícia/Edital", "resumo": "Do que se trata", "status": "Situação aparente" }} ]
+    [ {{ "titulo": "Titulo da Notícia", "resumo": "Explique a oportunidade", "status": "Link ou Data mencionada" }} ]
     
-    TEXTO:
-    {texto_site}
+    DADOS DO RSS:
+    {texto_rss}
     """
     try:
         resp = MODELO.generate_content(prompt)
@@ -113,21 +117,20 @@ def analisar_com_gemini(texto_site, nome_fonte):
 if __name__ == "__main__":
     relatorio_html = ""
     total = 0
-    print(">>> Iniciando Sentinela 56.0 (Estratégia Notícias)...")
+    print(">>> Iniciando Sentinela 57.0 (Estratégia Google RSS)...")
     
     for fonte in FONTES:
-        print(f"... Verificando: {fonte['nome']}")
-        conteudo = ler_pagina(fonte['url'])
+        print(f"... Consultando Google News: {fonte['nome']}")
+        conteudo = buscar_rss(fonte['query'])
         
         if conteudo:
-            print(f"   -> Texto extraído ({len(conteudo)} caracteres). IA Analisando...")
+            print(f"   -> Feed recebido! IA Analisando...")
             oportunidades = analisar_com_gemini(conteudo, fonte['nome'])
             
             if oportunidades:
-                print(f"   -> {len(oportunidades)} itens relevantes.")
+                print(f"   -> {len(oportunidades)} itens encontrados.")
                 total += len(oportunidades)
-                
-                # SEU DESIGN FAVORITO (CINZA COM BORDA VERDE)
+                # SEU DESIGN FAVORITO (MANTIDO)
                 relatorio_html += f"<div style='margin-bottom:25px; padding:15px; background:#f9f9f9; border-left:4px solid #009586;'>"
                 relatorio_html += f"<h3 style='margin-top:0; color:#005f56;'>📍 {fonte['nome']}</h3><ul style='padding-left:20px;'>"
                 for item in oportunidades:
@@ -139,34 +142,34 @@ if __name__ == "__main__":
                     </li>"""
                 relatorio_html += "</ul></div>"
             else:
-                print("   -> IA leu, mas não achou termos de editais recentes.")
+                print("   -> IA analisou o feed, mas não viu editais novos de Saúde/Física.")
         else:
-            print("   -> Falha total na leitura do site.")
-        time.sleep(2)
+            print("   -> Feed vazio ou erro.")
+        time.sleep(1)
 
     if not relatorio_html:
-        relatorio_html = "<p style='text-align:center; color:#777;'>Nenhuma oportunidade encontrada nas notícias recentes.</p>"
+        relatorio_html = "<p style='text-align:center; color:#777;'>Nenhuma novidade encontrada nos feeds hoje.</p>"
 
     html_final = f"""
     <html><body style='font-family:Arial, sans-serif; padding:20px;'>
         <div style='max-width:600px; margin:0 auto; border:1px solid #ddd; padding:20px;'>
-            <h2 style='color:#009586; text-align:center;'>SENTINELA OFICIAL</h2>
-            <p style='text-align:center; color:#aaa; font-size:12px;'>Monitoramento de Notícias & Editais</p>
+            <h2 style='color:#009586; text-align:center;'>SENTINELA RSS</h2>
+            <p style='text-align:center; color:#aaa; font-size:12px;'>Monitoramento via Google News</p>
             <hr style='border:0; border-top:1px solid #eee; margin:20px 0;'>
             {relatorio_html}
         </div>
     </body></html>
     """
 
-    print(f">>> Enviando e-mail para {len(DESTINOS)} pessoas.")
+    print(f">>> Enviando para {len(DESTINOS)} pessoas.")
     msg = EmailMessage()
-    msg['Subject'] = f'Sentinela: {total} Oportunidades (Varredura Notícias)'
+    msg['Subject'] = f'Sentinela: {total} Oportunidades (RSS Feed)'
     msg['From'] = EMAIL
     msg['To'] = EMAIL
     msg['Bcc'] = ', '.join(DESTINOS)
     msg.add_alternative(html_final, subtype='html')
 
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(EMAIL, SENHA)
-        smtp.send_message(msg)
-    print("✅ E-mail enviado!")
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
+        s.login(EMAIL, SENHA)
+        s.send_message(msg)
+    print("✅ Sucesso!")
