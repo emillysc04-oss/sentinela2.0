@@ -2,3 +2,4 @@ google-generativeai
 gspread
 requests
 beautifulsoup4
+cloudscraper
