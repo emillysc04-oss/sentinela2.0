@@ -5,7 +5,7 @@ from email.message import EmailMessage
 from bs4 import BeautifulSoup
 
 # --- 0. CONFIGURAÇÕES AVANÇADAS ---
-# Desabilita o aviso chato de segurança (já que vamos pular a verificação SSL intencionalmente)
+# Desabilita o aviso chato de segurança
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 EMAIL = os.environ.get('EMAIL_REMETENTE')
@@ -29,14 +29,18 @@ def obter_destinatarios():
                 sh = gc.open("Formulário sem título (respostas)")
             vals = sh.sheet1.col_values(3)
             validos = [e.strip() for e in vals if '@' in e and '.' in e and 'email' not in e.lower()]
-            if validos: lista = validos
-            print(f">>> Destinatários carregados: {len(lista)}")
-        except: pass
+            if validos: 
+                lista = validos
+                print(f">>> Sucesso: {len(lista)} destinatários carregados da planilha.")
+            else:
+                print(">>> Aviso: Planilha lida, mas vazia. Usando e-mail do dono.")
+        except Exception as e:
+            print(f">>> Erro Planilha: {str(e)[:50]}")
     return lista
 
 DESTINOS = obter_destinatarios()
 
-# --- 2. FONTES OFICIAIS ATUALIZADAS ---
+# --- 2. FONTES OFICIAIS ATUALIZADAS (COM FINEP E PROADI) ---
 FONTES = [
     {
         "nome": "FAPERGS (Editais)",
@@ -47,65 +51,60 @@ FONTES = [
         "url": "https://www.gov.br/cnpq/pt-br/composicao/diretorias/dco/chamadas-publicas/chamadas-publicas-abertas",
     },
     {
-        "nome": "Ministério da Saúde (Projetos)",
-        "url": "https://www.gov.br/saude/pt-br/composicao/sectics/deciis/editais-de-projetos",
+        "nome": "FINEP (Inovação)",
+        "url": "http://www.finep.gov.br/chamadas-publicas/chamadas-publicas-abertas",
+    },
+    {
+        "nome": "Proadi-SUS (Hospitais)",
+        "url": "https://hospitais.proadi-sus.org.br/projetos",
     }
 ]
 
 def ler_pagina(url):
     """Acessa a página fingindo ser um navegador comum e ignorando SSL"""
-    # Cabeçalho completo para enganar firewalls
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1'
     }
     
     try:
-        # verify=False é o segredo para sites gov.br não bloquearem a conexão
-        response = requests.get(url, headers=headers, timeout=20, verify=False)
+        response = requests.get(url, headers=headers, timeout=25, verify=False)
         response.encoding = 'utf-8'
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Limpeza cirúrgica: remove menus e rodapés inúteis
-            for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            for tag in soup(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
                 tag.decompose()
-                
             text = soup.get_text(separator=' ', strip=True)
-            return text[:25000] # Aumentei o limite para o Gemini ler mais
-            
+            return text[:30000] # Limite aumentado
         else:
             print(f"   -> Erro HTTP {response.status_code}")
-            
     except Exception as e:
-        print(f"   -> Erro de Conexão: {str(e)[:100]}...") # Mostra só o começo do erro
+        print(f"   -> Erro de Conexão: {str(e)[:100]}...")
     return ""
 
 def analisar_com_gemini(texto_site, nome_fonte):
     if not texto_site: return []
     
-    # Prompt ajustado para ser menos rígido com datas, mas focar no tema
+    # PROMPT TURBINADO (EDITOR SÊNIOR)
     prompt = f"""
-    Você é um Pesquisador Sênior. Analise este texto extraído do site: {nome_fonte}.
+    Atue como Editor Sênior do HCPA. Analise este texto do site: {nome_fonte}.
     
     OBJETIVO:
-    Identifique TODAS as chamadas, editais ou oportunidades de fomento listadas.
+    Identifique TODAS as chamadas, editais ou oportunidades ABERTAS (2025/2026).
     
-    CRITÉRIOS:
-    1. Ignore editais claramente encerrados em 2024 ou antes.
-    2. Busque por: Física Médica, Radioterapia, Inteligência Artificial, Saúde, Inovação, Bolsas (Mestrado/Doutorado/PQ).
-    3. Se houver dúvida se está aberto, INCLUA na lista para eu verificar.
+    FOCO ESTRATÉGICO:
+    1. Física Médica, Radioterapia, Medicina Nuclear.
+    2. Inteligência Artificial em Saúde e Inovação Hospitalar.
+    3. Compra de Equipamentos ou Bolsas de Pesquisa.
     
     SAÍDA JSON OBRIGATÓRIA:
     [
       {{
         "titulo": "Nome exato da chamada", 
-        "resumo": "Resumo em 1 frase", 
-        "status": "Aberto / Inscrições até..." 
+        "resumo": "Resumo focado no benefício (bolsa/equipamento)", 
+        "status": "Prazo ou Status" 
       }}
     ]
     
@@ -138,6 +137,8 @@ if __name__ == "__main__":
             if oportunidades:
                 print(f"   -> {len(oportunidades)} itens identificados!")
                 itens_encontrados += len(oportunidades)
+                
+                # --- SEU DESIGN PREFERIDO (Mantido Intacto) ---
                 relatorio_html += f"<div style='margin-bottom:25px; padding:15px; background:#f9f9f9; border-left:4px solid #009586;'>"
                 relatorio_html += f"<h3 style='margin-top:0; color:#005f56;'>📍 {fonte['nome']}</h3><ul style='padding-left:20px;'>"
                 
@@ -161,8 +162,8 @@ if __name__ == "__main__":
     html_final = f"""
     <html><body style='font-family:Arial, sans-serif; padding:20px;'>
         <div style='max-width:600px; margin:0 auto; border:1px solid #ddd; padding:20px;'>
-            <h2 style='color:#009586; text-align:center;'>SENTINELA 51.0</h2>
-            <p style='text-align:center; color:#aaa; font-size:12px;'>Monitoramento Direto de Fontes</p>
+            <h2 style='color:#009586; text-align:center;'>SENTINELA OFICIAL</h2>
+            <p style='text-align:center; color:#aaa; font-size:12px;'>Monitoramento Direto (CNPq, FAPERGS, FINEP, Proadi)</p>
             <hr style='border:0; border-top:1px solid #eee; margin:20px 0;'>
             {relatorio_html}
         </div>
